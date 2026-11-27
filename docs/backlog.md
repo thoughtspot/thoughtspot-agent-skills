@@ -540,6 +540,8 @@ are roughly ordered by value÷effort.
 | BL-648 | ts-audit Usage view (3.28.0): review nits deferred | 2027-01-31 |
 | BL-650 | SQL translators: `NOT x BETWEEN a AND b` binds NOT to the operand, and `x IN (SELECT …)` reads the subquery as a column | 2027-01-31 |
 | BL-651 | ts-audit: four small defects from the 2026-11-27 SE run (D8 GUID flips with API order, empty audit date, Usage view details, owner emails in the export) | 2027-01-31 |
+| BL-654 | Test-suite time: pre-commit in parallel, a lighter pytest matrix, then heavy areas by path | 2027-01-31 |
+| BL-655 | `test_worked_examples.py` breaks on pytest 10 (class-scoped fixture as an instance method) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -567,6 +569,7 @@ are roughly ordered by value÷effort.
 | ~~BL-273~~ | ~~`tools/ts-cli/CLAUDE.md:153` asserts `Current version: 0.135.0`; package is at 0.139.0 and nothing gates the line~~ | DONE (2026-09-22) |
 | BL-440 | ThoughtSpot formula output built as text, precedence repaired afterwards — move to a tree + printer (after BL-441) | after BL-441 |
 | BL-643 | from-databricks-mv: offer one combined Model when several MVs were split only by the chasm trap (parked 2026-11-26) | user request to resume |
+| BL-656 | pytest-xdist PR review leftovers: `_NO_XDIST` match, worker count in evidence, CHANGELOG figures, untested Chrome call sites | 2027-01-31 |
 
 ---
 
@@ -19869,11 +19872,16 @@ Blockers; these were triaged out of the PR). **Target:** 2027-01-31.
    the note header still says "tests skipped for a missing module" for that case.
 2. **The evidence's "Not reproduced locally" list omits the worker count** (local: one per
    CPU; CI: 4).
-3. **`CHANGELOG.md` 2026-11-27 figures:** "about 2 minutes at 18 workers" (the evidence run
-   took 187 s) and "needs `pytest-xdist==3.8.0`" (any xdist with `-n` works; 3.8.0 is CI's pin).
+3. **`CHANGELOG.md` 2026-11-27 figures:** "about 2 minutes at 18 workers" is one point of a
+   spread (the main invocation took 107-187 s across three evidence runs; record the range),
+   and "needs `pytest-xdist==3.8.0`" (any xdist with `-n` works; 3.8.0 is CI's pin).
+4. **Four of five headless-Chrome call sites are untested** (main's code since #768):
+   `agents/cli/ts-object-model-erd/tests/browser.py` and the three launches in
+   `tools/quest/tests/smoke_explore.py` go through `run_chrome`, but only `render`'s call
+   site has a test, so one reverted to a bare `subprocess.run` would pass every test.
 
-The review's Chrome-retry points (three `_dump_dom` copies, the ERD copy untested, a retry
-condition broader than its docstrings, BL-653 not updated) were overtaken by #768, which
+The review's other Chrome-retry points (three `_dump_dom` copies, a retry condition broader
+than its docstrings, BL-653 not updated) were overtaken by #768, which
 merged first: one `run_chrome` in `report_browser.py` retrying only the code-sign-clone
 signature, used by every headless-Chrome helper. This PR took #768's version.
 
