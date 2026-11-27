@@ -548,6 +548,7 @@ are roughly ordered by value÷effort.
 | BL-654 | Test-suite time: pre-commit in parallel, a lighter pytest matrix, then heavy areas by path | 2027-01-31 |
 | BL-655 | `test_worked_examples.py` breaks on pytest 10 (class-scoped fixture as an instance method) | 2027-01-31 |
 | BL-659 | Sisense `--target-model`: round-6 review leftovers (`isBetween`/`isCondition` accepted with any value, field_map onto an unreachable instance, two masked no-`datatype` gaps) | 2027-01-31 |
+| BL-661 | Power BI main DAX path: comments pass into the formula, and PR #517 review leftovers | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -18553,11 +18554,11 @@ points to BL-607 item 21 rather than repeating it.
 - `CALCULATE(COUNTROWS(DISTINCT(Sales[Cust])), ...)` becomes a row count, and `CALCULATE(COUNT(Fact[k]), ...)` counts rows with a blank key, which DAX `COUNT` skips.
 - `CALCULATE(SUM(Fact[x]), FILTER(ALL(Fact), <cond>))` drops the `ALL`, so a total that is the same in every row becomes per row. The running-total idiom `CALCULATE(SUM(Sales[Amount]), FILTER(ALL(Dates[Date]), Dates[Date] <= MAX(Dates[Date])))` is the common case. The rewrite runs before the review gate, so `ALL` never reaches the gate.
 
-PR #517 keeps the inputs its quote-aware argument splitter newly lets through (an `IN {...}` set; a `,` `(` `)` `[` or `]` inside a string; a `[column]` whose parens do not nest; a stray `]`) away from this rewrite, inside the CALCULATE (`_split_reads_differently`) and anywhere else in the measure (`_measure_reads_differently`), so they stay NEEDS REVIEW. The `=`-filter forms above, with nothing the earlier splitter misread, still reach it, as on main.
+PR #517 keeps the inputs its quote-aware argument splitter newly lets through (an `IN {...}` set; a `,` `(` `)` `[` or `]` inside a string; a `[column]` whose parens do not nest; a stray `]`) away from this rewrite, inside the CALCULATE (`_split_reads_differently`) and at every call the translator splits (`_legacy_reads_differently`), so they stay NEEDS REVIEW. The `=`-filter forms above, with nothing the earlier splitter misread, still reach it, as on main.
 
 **Do.**
 1. Give `_calc_approx` the gated parser's exact-shape rule (`ts_cli/powerbi/gated.py`): the first argument must be exactly `SUM(<column>)` or `COUNTROWS(<table>)`, and every filter exactly `<column> = <literal>`, `<column> IN {<literals>}` or a `FILTER(<table>, <one such condition>)` with no `ALL`/`ALLSELECTED`/`REMOVEFILTERS`. Refuse everything else.
-2. Then drop `_split_reads_differently`, since the exact-shape rule covers it (`_measure_reads_differently` stays until BL-611).
+2. Then drop `_split_reads_differently`, since the exact-shape rule covers it (`_legacy_reads_differently` stays until BL-611).
 3. A negative test per shape above, each against an `=` filter, an `IN {...}` set and a filter whose string holds a comma.
 
 **Target:** 2027-01-31.
@@ -18576,7 +18577,7 @@ PR #517 keeps the inputs its quote-aware argument splitter newly lets through (a
 
 ## BL-611 — `translate_dax` rewrites text inside DAX string literals and column names, so a filter on a string holding `[Col]`, `&&` or `NOT` matches a different value, labelled Migrated `Tier 2`
 
-**Filed:** 2026-11-19. **Source:** the PR #517 round-6 review, and two finds the PR's author reported in the same thread. All four are on `main` for text the earlier splitter read. PR #517 lets none of them through further: a measure whose calls the earlier splitter read differently stays NEEDS REVIEW (`_measure_reads_differently`), so a string with a comma inside a call, or a multi-member IN set inside a call, still refuses as on main.
+**Filed:** 2026-11-19. **Source:** the PR #517 round-6 review, and two finds the PR's author reported in the same thread. All four are on `main` for text the earlier splitter read. PR #517 lets none of them through further: a call the earlier splitter reads differently stays NEEDS REVIEW (`_legacy_reads_differently`), so a string with a comma inside a call, or a multi-member IN set inside a call, still refuses as on main; and a gated measure is refused when an earlier rewrite changed one of its string literals.
 
 **What.** Three passes in `ts_cli/powerbi/functions.py` run regex replacements over the whole expression, quoted text included, after the literals have been converted. Each one changes the value a string compares against or the column a reference names, and the result is labelled Migrated:
 
@@ -18584,11 +18585,12 @@ PR #517 keeps the inputs its quote-aware argument splitter newly lets through (a
 - `_normalize_operators` turns `&&`, `||` and `<>` into `and`, `or` and `!=` everywhere: `IF(T[s] = "a && b", 1, 0)` and `IF(T[s] IN {"a && b"}, 1, 0)` both compare against `'a and b'`.
 - `translate_dax` collapses every run of whitespace, inside strings too: `IF(T[s] = "a  b", 1, 0)` compares against `'a b'`.
 - The same pass lower-cases `NOT` inside a column name: `T[NOT]` becomes `[T::not]`, a different column on a case-sensitive warehouse.
+- `_refs_to_ids` rewrites a sibling measure's `[Name]` inside a string too: with a measure `Revenue`, `IF(Orders[Metric] = "[Revenue]", 1, 0)` compares against `'[formula_Revenue]'` (also on main). The gated path refuses the measure instead (PR #517).
 - The function-name scan (`_map_known_functions`) reads `a(` inside a string or a name as an unknown function, so `IF(T[s] = "a(", 1, 0)` is refused. This one over-refuses rather than giving a wrong value.
 
 **Do.**
 1. Make the rewrite passes (and the whitespace collapse) skip quoted text and `[…]` names, with the scanner `_opaque_end` already gives `_split_args` and `_match_paren`, rather than adding another regex. The wrong values go first.
-2. Then drop `_measure_reads_differently` (PR #517), which keeps every measure the earlier splitter misread at NEEDS REVIEW until this lands, and flip the tests that pin those refusals (`test_a_measure_the_legacy_splitter_misread_stays_needs_review`, `test_in_set_inside_if`, `test_text_the_legacy_splitter_misread_stays_needs_review_as_on_main`, `test_the_negation_scan_passes_a_multi_member_set_it_is_not_over`): a multi-member IN set inside `IF` and a string with a comma inside a call then translate.
+2. Then drop `_legacy_reads_differently` (PR #517), which keeps every measure the earlier splitter misread at NEEDS REVIEW until this lands, and flip the tests that pin those refusals (`test_a_measure_the_legacy_splitter_misread_stays_needs_review`, `test_in_set_inside_if`, `test_text_the_legacy_splitter_misread_stays_needs_review_as_on_main`, `test_the_negation_scan_passes_a_multi_member_set_it_is_not_over`): a multi-member IN set inside `IF` and a string with a comma inside a call then translate.
 3. A test per bullet above that asserts the literal or name survives unchanged, and that goes red with the fix reverted.
 4. Two test nits deferred from the same review: `test_value_set_is_linear` (`tests/test_powerbi_gated.py`) asserts a fixed 10-second bound. The quadratic code it guards against took 11.5s in review, so a faster runner would pass with it back and a slower one could fail on correct code; compare the time for n members with 2n instead. `test_deep_nesting_refuses_instead_of_raising` takes about 13s at 3,000 levels, and about 1,100 levels reach the same RecursionError in about 4s.
 
@@ -20054,3 +20056,27 @@ which found no blocker. **Target:** 2027-01-31.
    Sisense UI carry `datatype`.
 4. `_unmappable` refuses every unknown-kind filter (`contains`, …) even when keyed; a keyed entry
    would be safe for those kinds. Possible relaxation.
+
+---
+
+## BL-661 — Power BI main DAX path: comments pass into the formula, and PR #517 review leftovers `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the maintainer re-review of PR #517 (520,000-measure differential
+fuzz against `main`), which found no remaining blocker. **Target:** 2027-01-31.
+
+1. **A DAX comment is copied into the ThoughtSpot formula** (on `main` too). `DISTINCTCOUNT(T[b]) -- 1`
+   keeps its `-- 1`, and `SUM(T[n]) /* x */ * 2` keeps its comment. If ThoughtSpot reads `-- 1` as
+   minus minus-one, that is a silent `+ 1`. Not probed. Probe one of each on a live cluster; then strip
+   comments outside quoted text before translation, or refuse the measure as the gated parser does.
+2. **The IN-set comment guard can be bypassed** by a `"` inside a `[name]` or `'table'`, because
+   `DAX_STRING.sub` is not bracket-aware. The name comes out mangled (`[T::a'b]`), so import fails
+   loudly. Use `_string_literals`' bracket-aware scan instead.
+3. **A set's truth reaches a comparison through calls the negation scan does not follow**:
+   `IF(INT(T[Country] IN {"DE"}) = 0, 1, 0)`, and the same through `ABS`, `MAX(x, FALSE)`,
+   `CONCATENATE`, `DIVIDE`, `ROUND`, `LEN`, `SIGN` or `UPPER`. Migrated on `main` and on the branch;
+   most should fail ThoughtSpot's type check. BL-610 states the limit. Either refuse a set inside any
+   call other than the condition of `IF`, or probe what these compile to.
+4. **Test gaps.** Disabling `_split_reads_differently` fails no test: it still changes outcomes,
+   always toward refusal (`CALCULATE(COUNTROWS(T), T[s] IN {"a"})` is refused, where `main` gives
+   `sum_if`). Pin that, or drop it in favour of `_legacy_reads_differently` at the CALCULATE split
+   sites. `ISEMPTY` in `_BLANK_TESTS` is untested and unreachable (ISEMPTY takes a table); drop it.
