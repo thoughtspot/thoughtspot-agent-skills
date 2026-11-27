@@ -1484,6 +1484,8 @@ attempted for each, and ask whether to proceed with import anyway or make manual
 
 ## Step 7 — Review Checkpoint & Import
 
+> **R1:** before import, list any formula edited by hand whose meaning differs from the source, with the difference, and get approval (invariant R1).
+
 > **Scope gate:** runs for scopes 1, 2, 4. **Skip for scope 3** (model already exists)
 > and **scope 5** (no model — tables imported in Step 6 only).
 
@@ -1663,7 +1665,7 @@ dropped formula. **Caps:** max 15 formulas attempted (park the rest), max 3 atte
 2. **Skip if not fixable** — the error references another parked formula (dependency chain
    — fix that one first) or indicates a missing table/column (structural, not an expression
    fix).
-3. **Attempt a fix** — rewrite the expression per the error (parenthesise, fix function
+3. **Attempt a fix** (approve a meaning change first, R1) — rewrite the expression per the error (parenthesise, fix function
    name, add `TABLE::` qualifier, wrap date literal in `to_date()`), export the current
    model (`ts tml export {model_guid} --profile {profile_name} --parse`), add the fixed
    formula as a new `formulas[]`+`columns[]` pair, import (`ts tml import --profile
@@ -2512,6 +2514,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.47.2 | 2026-11-27 | Table TML columns are named by physical name, so a captioned column's `column_id` resolves at import (ts-cli v0.225.4). Tables imported by an earlier ts-cli keep caption names: regenerate them before scope 4 or a Phase-2 merge. |
+| 1.47.3 | 2026-11-27 | Step 7 asks for approval of any hand-edited formula whose meaning differs from the source (invariant R1, BL-640). |
 
-**Older entries (v1.0.0–v1.47.1):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.47.2):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

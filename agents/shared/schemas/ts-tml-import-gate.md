@@ -97,9 +97,13 @@ On `import_status: "failed"`, read `import_error` and consult this table:
 | `Invalid srcTable or destTable in join expression` | `on` clause references a table name that doesn't match any `id` in model_tables | Check that both `[table::col]` refs in `on` use `id` values |
 | `Multiple tables have same alias {name}` | Two model_tables entries have the same `name` value | Deduplicate — keep only one entry |
 | `fqn resolution failed` | GUID is stale or from a different ThoughtSpot instance | Re-fetch GUIDs from the current instance |
-| `formula syntax error` | ThoughtSpot formula has invalid syntax | Fix the formula expression |
+| `formula syntax error` | ThoughtSpot formula has invalid syntax | Fix the formula expression, keeping the source's meaning; if the fix changes it, get the user's approval first (invariant R1) |
 | YAML mapping error on formula with `{` | Formula with `{ [col] }` emitted as inline YAML string | Use block scalar (`>-`) for formula expressions containing `{`; CLI YAML emitters handle this automatically — arises in hand-edited TML |
 | YAML parse error | Non-printable characters in strings | Strip non-printable chars from all string values before serialising |
+
+Every fix in this table is subject to invariant **R1**
+(`ts-model-conversion-invariants.md`): a re-import after a fix that changes a formula's
+meaning needs the user's approval first, listed with the difference.
 
 ## 5. Post-import verification
 
