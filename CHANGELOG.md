@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-28
+- fix: the Databricks Metric View converter reads a dimension named by a direct dimension (`status_code: status`) or by a simple aggregate (`SUM(amount_usd)`) as that dimension, not a same-named source column; a measure filtered on such an alias returned 0 in ThoughtSpot (BL-629)
+- chore: bump ts-cli to v0.228.1
+
 ## 2026-11-27
 - feat: `ts databricks verify` checks that a Model converted from a Databricks Metric View returns the Metric View's numbers. It runs each query shape with `MEASURE()` on the Metric View and with AgentQL on the imported Model, and compares every cell by its Databricks type (counts exactly, DECIMAL at its scale, text exactly, DOUBLE within 1e-9). The default shapes are the total, each dimension, each boolean flag filtered `= true` and `= false`, and a search filter on one dimension value; when no value qualifies and no flag filter compared data, the run reports `incomplete`, not a match. An MV measure or dimension the Model lacks fails the run unless the converter skipped it, as does an imported Model that differs from the TML file. `ts-convert-from-databricks-mv` runs it in a new Step 11c, after checking the data can show a difference (BL-639; skill v1.22.0)
 - chore: bump ts-cli to v0.228.0

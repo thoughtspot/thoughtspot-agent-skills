@@ -241,3 +241,55 @@ def test_a_scalar_subquery_reads_physical_columns_not_dimensions():
 def test_an_lod_partition_reads_source_columns():
     ex = _exprs(_mv(LEAK))
     assert "{ [FACT_ORDERS::region] }" in ex["region_total"], ex["region_total"]
+
+
+# --- BL-629 remainder: a dimension named by a direct dimension or a simple aggregate ---
+_ALIAS_MV = """
+version: 1.1
+source: cat.sch.orders
+dimensions:
+  - name: status
+    expr: CASE WHEN source.status = 'O' THEN 'Open' ELSE 'Closed' END
+  - name: status_code
+    expr: status
+  - name: amount_usd
+    expr: source.amount / 100
+measures:
+  - name: open_orders
+    expr: COUNT(1) FILTER (WHERE status_code = 'Open')
+  - name: revenue
+    expr: SUM(amount_usd)
+  - name: statuses
+    expr: COUNT(DISTINCT status)
+  - name: raw_amount
+    expr: SUM(source.amount)
+"""
+
+
+def _alias_out():
+    from ts_cli.databricks.mv_parse import parse_metric_view
+    from ts_cli.databricks.mv_translate import translate_metric_view
+    out = translate_metric_view(parse_metric_view(_ALIAS_MV), {"source": "ORDERS"})
+    return {e["name"]: e for e in out["translated"]}
+
+
+def test_direct_dimension_naming_a_dimension_is_an_alias_formula():
+    e = _alias_out()["status_code"]
+    assert e["output_kind"] == "formula" and e["ts_expr"] == "[formula_Status]"
+
+
+def test_measure_filter_through_the_alias_reads_the_dimension():
+    # was count_if ( [ORDERS::status] = 'Open' , 1 ): 0 in ThoughtSpot (status holds 'O')
+    assert _alias_out()["open_orders"]["ts_expr"] == "count_if ( [formula_Status Code] = 'Open' , 1 )"
+
+
+def test_simple_aggregate_over_a_computed_dimension():
+    out = _alias_out()
+    assert out["revenue"]["ts_expr"] == "sum ( [formula_Amount Usd] )"
+    assert out["statuses"]["ts_expr"] == "unique count ( [formula_Status] )"
+
+
+def test_qualified_source_column_is_unchanged():
+    e = _alias_out()["raw_amount"]
+    assert (e["output_kind"], e["table"], e["column"], e["aggregation"]) == \
+        ("column", "ORDERS", "amount", "SUM")
