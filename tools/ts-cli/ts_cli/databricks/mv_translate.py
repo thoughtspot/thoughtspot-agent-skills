@@ -254,6 +254,12 @@ def translate_dimension(dim: dict, tables: dict) -> dict:
     """Translate one parsed dimension. Raises UntranslatableError to skip."""
     kind = dim["kind"]
     if kind == "direct":
+        alias = _dimension_ref(dim["expr"])
+        if alias is not None:
+            # BL-629: `status_code: status` after a dimension `status` reads that
+            # dimension in Databricks (an earlier dimension shadows the column)
+            return _entry(dim["name"], "dimension", "formula", "ATTRIBUTE", dim,
+                          ts_expr=alias)
         table, column = resolve_parts(tables, dim["expr"])
         return _entry(dim["name"], "dimension", "column", "ATTRIBUTE", dim,
                       table=table, column=column)
@@ -360,6 +366,8 @@ def _translate_measure_kind(measure: dict, kind: str, tables: dict,
                             resolver) -> dict:
     if kind == "simple":
         return _translate_simple(measure, tables)
+    if kind == "count_distinct" and _dimension_ref(measure["physical_ref"]) is not None:
+        return _formula_measure(measure, translate_sql_expr(measure["expr"], resolver))
     if kind == "count_distinct":
         table, column = resolve_parts(tables, measure["physical_ref"])
         return _formula_measure(measure,
@@ -388,6 +396,11 @@ def _formula_measure(measure: dict, ts_expr: str, *,
 
 
 def _translate_simple(measure: dict, tables: dict) -> dict:
+    if _dimension_ref(measure["physical_ref"]) is not None:
+        # BL-629: SUM(amount_usd) over a dimension aggregates the dimension, not a
+        # same-named column; the resolver reads the name as the dimension
+        return _formula_measure(
+            measure, translate_sql_expr(measure["expr"], make_resolver(tables)))
     if measure["distinct"]:
         raise UntranslatableError(
             f"{measure['agg_function']}(DISTINCT …) has no ThoughtSpot "
