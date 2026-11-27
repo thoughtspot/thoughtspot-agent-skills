@@ -758,7 +758,7 @@ def _widget_tiles(inv, widgets, binder, model_fqn) -> tuple:
         if oid in hidden:
             rows.append(_merged_row(w, hidden[oid][0]))
             merged.append((rows[-1], hidden[oid][1]))
-        elif w.get("wtype") in ("WidgetsTabber", "richtexteditor"):
+        elif w.get("wtype") in ("WidgetsTabber", "richtexteditor") or w.get("text_card"):
             placed[oid], content[oid] = {"kind": "note", "ct": None}, ("note", _note_text(w, inv))
         else:
             title = _GRAIN_SUFFIX.sub("", w.get("title") or "") if oid in kept_tabs else None

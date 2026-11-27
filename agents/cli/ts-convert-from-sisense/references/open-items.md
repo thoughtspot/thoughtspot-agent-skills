@@ -154,3 +154,41 @@ the obj_id. Other punctuation (`_`, `-`, `.`, `&`, `/`) is unverified, and two M
 carried custom obj_ids. The `--target-model` path is unaffected (it uses the exported obj_id); the
 derived path (`--model-fqn`, every converter) may still mis-bind a name with other punctuation.
 Fix by sampling server-generated obj_ids for those characters.
+
+## #9 — Widget measures, measured values, widget filters, ignore, pivots — VERIFIED 2026-11-26
+
+`build-liveboard` now emits widget measures as Answer formulas, measured values as
+`group_aggregate` over a conditional aggregate, widget `metadata.ignore` as `group_aggregate`
+filter sets, tile filters shadowed by a Liveboard filter as measure conditions, KPI tiles with
+a y axis, and flattened pivots as `TABLE_MODE` grids. Verified on **ps-internal** (a test Org)
+over a single-table Databricks dataset shaped like a recruiting pipeline (synthetic rows):
+the model and a 14-tile Liveboard generated from a real-shaped bundle (with three synthetic
+widgets added for `ignore.ids`, `ignore.all` and a Columns-panel pivot) imported with no
+error, and every tile returned data. Numbers reconciled with direct SQL on the same table:
+
+- distinct jobs 120, published 83, unpublished 37; distinct applications 2,500; positions
+  755, unpublished positions 246; pivot cells (18, 20) and (25, 14) for two companies;
+- under a Liveboard runtime filter on the status column: the `ignore.ids` tile and the
+  `ignore.all` tile stay 2,500, the measured value "Unpublished Jobs" stays 37, and a tile
+  whose own filter is `Status = Published` reads 0 (the Sisense intersection) rather than the
+  37 a search filter would give;
+- under a runtime filter on the company column: the `ignore.ids` tile narrows to 376 (= SQL)
+  while the `ignore.all` tile stays 2,500.
+
+Found during verification: a `GRID_TABLE` emitted in `CHART_MODE` imports cleanly but its
+Liveboard tile returns "No data source found for the query"; the same Answer in `TABLE_MODE`
+renders. The Sisense path now sets `TABLE_MODE`. The shared emitter
+(`ts_cli/tableau/liveboard.build_answer`) still emits `CHART_MODE` for every chart type, so
+the other converters' grids are exposed to the same failure (follow-up, not changed here).
+
+Test objects were deleted after verification.
+
+## #10 — UNION of timestamps in a hand-written SQL view — KNOWN (Snowflake)
+
+When a Sisense cube is rebuilt as a ThoughtSpot SQL view (a custom table, or several Sisense
+tables unioned into one event table), Snowflake refuses a `UNION` whose branches mix
+`TIMESTAMP_NTZ` with `TIMESTAMP_TZ`/`TIMESTAMP_LTZ` columns; casting every timestamp branch to
+`::TIMESTAMP_NTZ` fixed it on a production Snowflake migration (2026-11-26). Not reproduced on
+ps-internal (no active Snowflake connection there). Databricks does not fail: a `UNION ALL` of
+`TIMESTAMP` and `TIMESTAMP_NTZ` returns `TIMESTAMP` (probed 2026-11-26), but the values are
+then read in the session time zone, so cast there too when the sources disagree.

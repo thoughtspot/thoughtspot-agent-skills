@@ -20,7 +20,7 @@ Verified JSON shapes (live Sisense Cloud trial, standalone converter):
 """
 from __future__ import annotations
 
-from ts_cli.sisense.allowlist import (dashboard_filter_unsupported, dashboard_unsupported, datamodel_unsupported,
+from ts_cli.sisense.allowlist import (blox_text, dashboard_filter_unsupported, dashboard_unsupported, datamodel_unsupported,
                                      drill_unsupported, relation_problem, table_physical, table_unsupported,
                                      widget_info, widget_unsupported)
 
@@ -154,10 +154,33 @@ def parse_datamodel(raw: dict, warnings: list) -> tuple:
 # Dashboard / widgets (best-effort; the model path does not consume these)
 # --------------------------------------------------------------------------- #
 def _items(widget: dict):
+    """(panel name, item) for every ENABLED plotted item, and every filter item. Sisense keeps a
+    hidden item in the export with ``disabled: true``; it is not part of the widget's query, and
+    converting it adds a hidden measure or, worse, a hidden row that changes a table's grain. A
+    disabled filter is still yielded so ``_parse_item`` lists it under ``disabled_filters``."""
     for panel in (widget.get("metadata") or {}).get("panels", []) or []:
         pname = panel.get("name") or ""
         for item in panel.get("items", []) or []:
-            yield pname, item
+            if not item.get("disabled") or pname.lower() == "filters":
+                yield pname, item
+
+
+def _disabled_count(widget: dict) -> int:
+    try:   # a malformed panel is reported by parse_widget; it must not abort the count
+        return sum(1 for panel in (widget.get("metadata") or {}).get("panels", []) or []
+                   for item in panel.get("items", []) or [] if isinstance(item, dict) and item.get("disabled"))
+    except (AttributeError, TypeError):
+        return 0
+
+
+def _ignore(widget: dict) -> dict:
+    """``metadata.ignore`` -> {all, ids, dimensions}: the dashboard filters this widget
+    does not take (``ids`` are dashboard filter ``instanceid``s)."""
+    ig = (widget.get("metadata") or {}).get("ignore") or {}
+    if not isinstance(ig, dict):
+        ig = {}
+    return {"all": bool(ig.get("all")), "ids": list(ig.get("ids") or []),
+            "dimensions": list(ig.get("dimensions") or [])}
 
 
 def _jaql_to_field(jaql: dict) -> dict | None:
@@ -178,8 +201,9 @@ def _jaql_to_field(jaql: dict) -> dict | None:
     else:
         kind, f = "dimension", None
     out = {"kind": kind, "dim": dim, "agg": agg, "title": jaql.get("title") or "",
-           "formula": f, "level": jaql.get("level")}
-    for key in ("datatype", "firstday", "dateTimeLevel"):
+           "formula": f, "level": jaql.get("level"),
+           "datatype": jaql.get("datatype") or ""}
+    for key in ("firstday", "dateTimeLevel"):
         if jaql.get(key):
             out[key] = jaql[key]
     return out
@@ -236,6 +260,7 @@ _KIND_FILTER_KEYS = {
     "relative_date": {"last", "next"},
     "top_n": {"top", "bottom", "by"},
     "range": {"from", "to", "fromNotEqual", "toNotEqual", "equals", "isBetween"},
+    "all": set(),
     "unknown": set(),
 }
 
@@ -252,7 +277,7 @@ def _unsupported_keys(kind: str, f: dict) -> list:
 _CONDITION_KEYS = {k: v - {"by", "isCondition", "isBetween"} for k, v in _KIND_FILTER_KEYS.items()}
 # `explicit` as Sisense writes it beside each kind (21 real dashboards: members true, all and
 # exclude false); any other value is refused rather than given a meaning.
-_EXPLICIT_OK = {"member": (True,), "exclude": (False,), "unknown": (False,)}
+_EXPLICIT_OK = {"member": (True,), "exclude": (False,), "unknown": (False,), "all": (False,)}
 
 
 def _combination_problems(kind: str, f: dict) -> list:
@@ -275,9 +300,16 @@ def _member_shape_problems(kind: str, f: dict) -> list:
     return ["members (not a list)"] if kind in ("member", "exclude") and not isinstance(members, list) else []
 
 
-# Ordered so the first matching kind wins (member > exclude > relative_date > top_n > range).
+def _classify_all(f: dict, dim) -> dict | None:
+    if not f.get("all"):
+        return None
+    return {"kind": "all", "dim": dim, "operator": "all", "values": [], "raw": f}
+
+
+# Ordered so the first matching kind wins
+# (member > exclude > relative_date > top_n > range > all).
 _FILTER_CLASSIFIERS = (_classify_member, _classify_exclude, _classify_relative_date,
-                       _classify_top_n, _classify_range)
+                       _classify_top_n, _classify_range, _classify_all)
 
 
 def _classify_filter(jaql: dict) -> dict | None:
@@ -372,6 +404,8 @@ def parse_widget(widget: dict, warnings: list) -> dict:
         "subtype": widget.get("subtype") or "",
         "fields": acc["fields"],
         "filters": acc["filters"],
+        "ignore": _ignore(widget),
+        "disabled_items": _disabled_count(widget),
     }
     source = (widget.get("datasource") or {}).get("title") if isinstance(widget.get("datasource"), dict) else None
     if source:
@@ -424,6 +458,10 @@ def _widget_extras(widget: dict) -> dict:
     if wtype == "richtexteditor":
         content = style.get("content") or {}
         extras["richtext"] = {"html": content.get("html") or "", "bg_color": content.get("bgColor") or ""}
+    text = blox_text(widget)
+    if text is not None:            # a BloX banner that plots nothing reads as rich text
+        extras["text_card"] = True
+        extras["richtext"] = {"html": text, "bg_color": ""}
     drill = widget.get("drillToDashboardConfig") or {}
     targets = _drill_targets(drill)
     if targets:

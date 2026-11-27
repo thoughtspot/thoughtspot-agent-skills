@@ -361,7 +361,56 @@ def _rewrite_round(expr: str, start: int = 0) -> tuple:
     return _rewrite_round(expr, open_idx + 1)
 
 
-def translate_jaql(expr, context: dict | None = None) -> tuple:
+def _measured_value(inner: str, keys: list, context: dict, scope) -> tuple:
+    """One measured value ``(inner, [k1], …)`` -> (ThoughtSpot text | None, status, note).
+
+    The value's own filters become a condition on every aggregate inside it, and the
+    columns they filter are dropped from the query filters (``group_aggregate``), because
+    in Sisense a measured value's filter replaces any dashboard or widget filter on the
+    same column (verified on a live cube). See ``scope.py``."""
+    from ts_cli.sisense.scope import Scope, filter_condition, scope_expression
+    scope = scope or Scope()
+    sub, status, note = translate_jaql(inner, context)
+    if sub is None:
+        return None, status, note
+    conds, cols = [], []
+    for k in keys:
+        frag = context.get(k) or context.get("[" + k + "]") or {}
+        col = _column_from_dim(frag.get("dim"))
+        if col is None:
+            return None, "NEEDS REVIEW", f"measured value filter '{k}' has no dimension"
+        cond, err = filter_condition(col, frag.get("filter") or {}, frag.get("datatype") or "")
+        if err:
+            return None, "NEEDS REVIEW", f"measured value: {err}"
+        cols.append(col)
+        conds.append(cond)
+    from ts_cli.sisense.scope import and_conds
+    text = scope_expression(sub, scope, extra_cond=and_conds(conds), drop_cols=cols,
+                            skip_cond_cols=cols)
+    mv_note = ("measured value: filter on " + ", ".join(cols) + " applied as a condition, "
+               "query filters on it dropped (group_aggregate), as Sisense does")
+    return text, status, "; ".join(n for n in (note, mv_note) if n)
+
+
+def _translate_measured_values(source: str, context: dict, scope, coverage: str,
+                               notes: list) -> tuple:
+    """-> (source with sentinels, {sentinel: text}, coverage, terminal | None)."""
+    from ts_cli.sisense.scope import extract_measured_values
+    source, mvs = extract_measured_values(source)
+    mv_text: dict = {}
+    for key, inner, keys in mvs:
+        text, st, note = _measured_value(inner, keys, context, scope)
+        if text is None:
+            return source, mv_text, coverage, (None, "NEEDS REVIEW", note)
+        if st == "Approximated":
+            coverage = _apply_downgrade(coverage, notes, _PARTIAL)
+        if note and note not in notes:
+            notes.append(note)
+        mv_text[key] = text
+    return source, mv_text, coverage, None
+
+
+def translate_jaql(expr, context: dict | None = None, scope=None) -> tuple:
     """Translate a Sisense JAQL formula + context into a TML formula expression.
 
     Steps (per the standalone converter):
@@ -376,10 +425,18 @@ def translate_jaql(expr, context: dict | None = None) -> tuple:
 
     Returns (expr_out, status, note); expr_out is None when status == "NEEDS REVIEW".
     """
+    from ts_cli.sisense.scope import scope_expression
     source = expr or ""
     context = context or {}
     coverage = _AUTO
     notes: list = []
+
+    # 0. Measured values `(agg, [Dim])` -> sentinels, each translated on its own (they used
+    #    to pass through verbatim as a tuple ThoughtSpot cannot parse).
+    source, mv_text, coverage, terminal = _translate_measured_values(source, context, scope,
+                                                                    coverage, notes)
+    if terminal is not None:
+        return terminal
 
     # 1. Validate every function call in the ORIGINAL source (unsupported/unknown/case -> abort).
     coverage, terminal = _inspect_functions(source, coverage, notes)
@@ -417,5 +474,12 @@ def translate_jaql(expr, context: dict | None = None) -> tuple:
     # Literals into ThoughtSpot's exact form (read SQL-standard: '' is one quote, a
     # backslash is literal); `a * b / c` bracketed (BL-365)
     out = ts_finalize_formula(out)
+
+    # 6. Widget scope (tile conditions, ignored dashboard filters) on the aggregates outside
+    #    any measured value, then the measured values themselves (already scoped).
+    if scope is not None and not scope.trivial():
+        out = scope_expression(out, scope)
+    for key, text in mv_text.items():
+        out = out.replace("[" + key + "]", text)
 
     return out, _STATUS[coverage], "; ".join(notes)

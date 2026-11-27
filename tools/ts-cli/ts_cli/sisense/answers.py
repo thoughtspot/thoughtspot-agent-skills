@@ -34,6 +34,7 @@ _CHART_MAP: dict[str, str] = {
     "pivot": "PIVOT_TABLE",
     "pivot2": "PIVOT_TABLE",
     "tablewidget": "GRID_TABLE",
+    "tablewidgetagg": "GRID_TABLE",  # table with aggregation: grouped rows, as a ThoughtSpot grid
     "treemap": "TREEMAP",
     "sunburst": "GRID_TABLE",      # approx
     "richtexteditor": None,        # text widget -> no Answer; skip
@@ -132,32 +133,33 @@ def _resolve_col(name: str, norm: dict) -> str | None:
     return norm.get(base.lower())
 
 
-def _resolve_fields(widget: dict, norm: dict) -> tuple:
-    """Resolve a widget's JAQL fields to model columns by display-name match, keeping each
-    field's role. Returns (fields, bucket_tokens, missing) where fields are build_from_spec
-    ``{name, role, measure}`` dicts and bucket_tokens maps a column -> its search token."""
-    fields, seen, bucket_tokens, missing = [], set(), {}, []
+def _resolve_dims(widget: dict, norm: dict) -> tuple:
+    """A widget's DIMENSION fields -> (dims, bucket_tokens, missing). Each dim is
+    ``{name, role, dim, datatype}``; a date ``level`` becomes a ``[Col].MONTHLY`` token."""
+    dims, seen, bucket_tokens, missing = [], set(), {}, []
     for f in widget.get("fields", []):
         role = _panel_role(f.get("panel"))
-        if role is None:            # gauge bound / filter / secondary badge -> not plotted
+        if role is None or f.get("kind") == "measure":
             continue
         col = _resolve_col(_model_col(f.get("dim")), norm)
         if not col:
-            # a formula-bound measure or a dropped/unexposed field -> can't map to a named column
             missing.append(f.get("title") or _model_col(f.get("dim")) or "?")
             continue
         if col in seen:             # same dim used as category + break-by -> keep once
             continue
         seen.add(col)
-        is_measure = (f.get("kind") == "measure")
-        fld = {"name": col, "measure": is_measure}
-        # a measure's axis is always y; give a dimension its panel role (default Category).
-        fld["role"] = "Values" if is_measure else (role or "Category")
-        fields.append(fld)
-        suf = date_bucket_suffix(f.get("level")) if not is_measure else None
+        dims.append({"name": col, "role": role or "Category", "dim": f.get("dim"),
+                     "datatype": f.get("datatype") or ""})
+        suf = date_bucket_suffix(f.get("level"))
         if suf:
             bucket_tokens[col] = f"[{col}].{suf}"
-    return fields, bucket_tokens, missing
+    return dims, bucket_tokens, missing
+
+
+def _measure_fields(widget: dict) -> list:
+    """Plotted measure fields (gauge bounds, KPI secondary badges and filters excluded)."""
+    return [f for f in widget.get("fields", [])
+            if f.get("kind") == "measure" and _panel_role(f.get("panel")) is not None]
 
 
 def _widget_top_n(widget: dict) -> int | None:
@@ -189,39 +191,105 @@ def _note_join(note: str, msg: str) -> str:
     return (note + "; " + msg) if note else msg
 
 
-def _widget_answer(widget, idx, tab, model_name, model_fqn, norm, measures, build_answer):
+_STATUS_RANK = {"Migrated": 0, "Approximated": 1, "NEEDS REVIEW": 2}
+
+
+def _worse(a: str, b: str) -> str:
+    return a if _STATUS_RANK.get(a, 0) >= _STATUS_RANK.get(b, 0) else b
+
+
+def _widget_columns(widget, ct, ctx):
+    """Resolve a widget into answer columns -> dict (see _widget_answer)."""
+    from ts_cli.sisense.widget_fields import build_scope, flatten_pivot, measure_formulas
+    dims, bucket_tokens, missing = _resolve_dims(widget, ctx["norm"])
+    scope, search, notes, ok = build_scope(widget, ctx["dash_filters"], ctx["norm"],
+                                           ctx["lb_cols"])
+    formulas, plain, mstatus, mnotes, mmissing = measure_formulas(
+        _measure_fields(widget), scope, ctx["norm"], ctx["measures"])
+    notes += mnotes
+    if ct == "PIVOT_TABLE":
+        ct, dims, formulas, plain, pnote = flatten_pivot(widget, dims, formulas, plain,
+                                                         ctx["norm"])
+        notes.append(pnote)
+    return {"ct": ct, "dims": dims, "formulas": formulas, "plain": plain,
+            "bucket_tokens": bucket_tokens, "search": search, "notes": notes,
+            "missing": missing + mmissing,
+            "status": _worse(mstatus, "Migrated" if ok else "NEEDS REVIEW")}
+
+
+def _widget_answer(widget, idx, tab, model_name, model_fqn, ctx, build_answer):
     """One Sisense widget -> (answer_obj|None, tile_item|None, report_row).
 
     Drives the shared emitter's ``build_answer`` with OUR resolved ``ts_chart`` and status,
     rather than letting build_from_spec re-infer the chart from a mark (main's emitter ignores
     a per-visual ts_chart and hardcodes "Migrated"). So the Sisense widget-type mapping and the
-    Approximated / NEEDS REVIEW signal both survive into the migration report.
+    Approximated / NEEDS REVIEW signal both survive into the migration report. Widget measures
+    become Answer formulas and widget filters search tokens or measure conditions
+    (``widget_fields``); the formulas are attached to the emitted Answer.
     """
-    title = widget.get("title") or f"Visual {idx + 1}"
     ct, status, note = chart_type_for(widget.get("wtype"), widget.get("subtype"))
+    if widget.get("text_card"):                       # a BloX banner: text, no data
+        ct, status, note = None, "Skipped", "BloX card with no data fields (a text banner, not a data visual)"
+    # An untitled widget (every Sisense indicator) is named after its first measure.
+    first = next((f.get("title") for f in _measure_fields(widget) if f.get("title")), None)
+    title = widget.get("title") or first or f"Visual {idx + 1}"
     if ct is None:                                    # text/no-chart widget -> skip
         return None, None, {"page": tab, "visual": title, "ts_chart": "(skipped)",
                             "status": "Skipped", "note": note}
-    fields, bucket_tokens, missing = _resolve_fields(widget, norm)
-    cols = [f["name"] for f in fields]
+    r = _widget_columns(widget, ct, ctx)
+    ct = r["ct"]
+    fnames = [f["name"] for f in r["formulas"]]
+    cols = [d["name"] for d in r["dims"]] + r["plain"] + fnames
     if not cols:
         return None, None, {"page": tab, "visual": title, "ts_chart": ct,
                             "status": "NEEDS REVIEW",
                             "note": _note_join(note, "no fields mapped to model columns")}
-    roles = [f["role"] for f in fields]
-    n_meas = sum(1 for c in cols if c in measures)
-    if ct not in _NO_MEASURE_OK and n_meas == 0:      # flag, don't downgrade
-        status = "NEEDS REVIEW"
-        note = _note_join(note, f"{ct} needs a measure but none mapped")
-    if missing:
-        note = _note_join(note, "unmapped field(s): " + ", ".join(missing))
+    roles = [d["role"] for d in r["dims"]] + ["Values"] * (len(r["plain"]) + len(fnames))
+    status, note = _review(ct, status, note, r, fnames)
     if _rank_note(widget):                            # flag, never turn a bottom N into a top N
         status = "NEEDS REVIEW"
         note = _note_join(note, _rank_note(widget))
     a_obj = build_answer(title, f"{tab}-{idx}", model_name, model_fqn, cols, ct,
-                         measures, roles, bucket_tokens, _widget_top_n(widget))
+                         set(ctx["measures"]) | set(fnames), roles, r["bucket_tokens"],
+                         _widget_top_n(widget))
+    _decorate(a_obj["answer"], ct, r)
     return a_obj, {"answer": a_obj["answer"], "tile": None}, \
         {"page": tab, "visual": title, "ts_chart": ct, "status": status, "note": note}
+
+
+def _review(ct, status, note, r, fnames) -> tuple:
+    """Fold a widget's resolution notes and gaps into its (status, note)."""
+    status = _worse(status, r["status"])
+    if ct not in _NO_MEASURE_OK and not (r["plain"] or fnames):   # flag, don't downgrade
+        status = "NEEDS REVIEW"
+        note = _note_join(note, f"{ct} needs a measure but none mapped")
+    for n in r["notes"]:
+        note = _note_join(note, n)
+    if r["missing"]:
+        status = _worse(status, "NEEDS REVIEW")
+        note = _note_join(note, "unmapped field(s): " + ", ".join(r["missing"]))
+    return status, note
+
+
+def _decorate(ans: dict, ct: str, r: dict) -> None:
+    """Widget filters, formulas and the grid display mode onto an emitted Answer."""
+    if ct == "GRID_TABLE":
+        # A GRID_TABLE in CHART_MODE imports cleanly but its Liveboard tile returns "No data
+        # source found for the query"; TABLE_MODE renders (live-verified 2026-11-26).
+        ans["display_mode"] = "TABLE_MODE"
+    if r["search"]:
+        ans["search_query"] = (ans["search_query"] + " " + " ".join(r["search"])).strip()
+    if r["formulas"]:
+        ans["formulas"] = r["formulas"]
+
+
+def _widget_ctx(inv: dict, column_names, measure_names) -> dict:
+    """What every widget resolves against: the Model's names and the Liveboard filters."""
+    chips = extract_liveboard_filters(inv, column_names, measure_names)
+    return {"norm": {n.lower(): n for n in (column_names or [])},
+            "measures": set(measure_names or []),
+            "dash_filters": (inv.get("dashboard") or {}).get("filters") or [],
+            "lb_cols": {c["column"][0] for c in chips}}
 
 
 def build_liveboard_result(inv: dict, model_name: str, model_fqn=None, column_names=None,
@@ -236,16 +304,15 @@ def build_liveboard_result(inv: dict, model_name: str, model_fqn=None, column_na
     from ts_cli.tableau.liveboard import build_answer, build_liveboard
 
     overrides = overrides or {}
-    measures = set(measure_names or [])
-    norm = {n.lower(): n for n in (column_names or [])}
     dash = inv.get("dashboard") or {}
     report_name = overrides.get("report_name") or dash.get("title") or model_name
     tab = dash.get("title") or report_name
 
+    ctx = _widget_ctx(inv, column_names, measure_names)
     answers, items, rows = [], [], []
     for i, w in enumerate(inv.get("widgets", []) or []):
-        a_obj, item, row = _widget_answer(w, i, tab, model_name, model_fqn, norm,
-                                          measures, build_answer)
+        a_obj, item, row = _widget_answer(w, i, tab, model_name, model_fqn, ctx,
+                                          build_answer)
         if a_obj:
             answers.append(a_obj)
         if item:

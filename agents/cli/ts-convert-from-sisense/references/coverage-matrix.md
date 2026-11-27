@@ -1,4 +1,4 @@
-<!-- coverage-matrix last-reviewed: 2026-10-27 -->
+<!-- coverage-matrix last-reviewed: 2026-11-26 -->
 # Coverage matrix — Sisense → ThoughtSpot
 
 Every Sisense construct and its conversion status. Cite in the migration report. Within
@@ -61,12 +61,20 @@ uncalled `AGG_MAP` was deleted with BL-447). These rows are the reading to apply
 | `chart/bubble` | Approximated | `SCATTER` (bubble size dropped) |
 | `chart/polar` / `sunburst` / `treemap` | Approximated | nearest chart (`COLUMN` / `GRID_TABLE` / `TREEMAP`), same values |
 | `chart/boxplot`, any unmapped widget type, a 100% stack | Flagged | NEEDS REVIEW: what it computes (quartiles, an unknown plugin, shares) is not what the emitted chart shows |
-| `indicator` | Mapped | `KPI` |
-| `pivot` / `pivot2` | Mapped | `PIVOT_TABLE` (role-aware Rows/Columns) |
-| `tablewidget` | Mapped | `GRID_TABLE` |
+| `indicator` | Mapped | `KPI` with `axis_configs: [{y: [<value>]}]` (a KPI without a y axis fails import with "Index: 0"); its value formula becomes an Answer formula and the untitled tile is named after it |
+| `pivot` / `pivot2` with no Columns panel | Mapped | `GRID_TABLE` (a flat table already; PIVOT_TABLE refuses large unfiltered results — "too many results" — so a job- or person-level pivot did not render) |
+| `pivot` / `pivot2` whose Columns dimension has a member list | Mapped | `GRID_TABLE` with one conditional measure per member and value |
+| `pivot` / `pivot2` whose Columns values are not in the bundle | Approximated | `PIVOT_TABLE` kept and noted: flatten by hand if its rows are high-cardinality |
+| `tablewidgetagg` (table with aggregation) | Mapped | `GRID_TABLE`, `display_mode: TABLE_MODE`: grouped rows, as a ThoughtSpot grid groups them |
+| `tablewidget` | Mapped | `GRID_TABLE`, `display_mode: TABLE_MODE` (a GRID_TABLE in CHART_MODE imports but its Liveboard tile returns "No data source found for the query", live 2026-11-26) |
 | JAQL panels → roles | Mapped | Categories/x-axis→Category, Break-by→Series(color), Values/y-axis→Values, Rows/Columns→pivot axes |
 | Date `level` → date bucket | Mapped | `hours/days/weeks/months/quarters/years` → `HOURLY…YEARLY` (worked example) |
 | Per-attribute top N | Mapped | baked into the widget answer as `top N` (default path); a bottom N, or an N that is not a whole number, is NEEDS REVIEW rather than turned into `top N` |
+| Widget measure formula (`count([k])`, `(sum([a]),[b])/…`) | Mapped | an Answer formula named after the widget item (was dropped as an unmapped field) |
+| Measured value `(agg, [Dim])` | Mapped | `group_aggregate ( <agg>_if ( <Dim filter> , x ) , G , query_filters ( ) - { [Dim] } )` — the value's filter replaces filters on that column, as in Sisense (was copied verbatim as a tuple ThoughtSpot cannot parse) |
+| Widget filter (Filters panel or a filtered item) | Mapped | search tokens; when the column also has a dashboard filter, a condition folded into each measure, because a Liveboard filter on a column replaces the tile's filter |
+| Widget `metadata.ignore` (ids / dimensions / all) | Mapped | `group_aggregate ( agg , G , query_filters ( ) - { [col] } )`; `all` → `group_aggregate ( agg , G , { } )` |
+| Disabled (hidden) panel item | Dropped | not part of the widget's query; converting it added hidden measures and changed a table's grain |
 | Dashboard filter bar → Liveboard chips | Mapped | member→`oper: in`, exclude→`oper: not in`, top-level `values` (the exported-Liveboard shape, verified to filter — open-item #5) |
 | Cascading dashboard filter group (`levels[]`, e.g. Region > Country > City) | Mapped | one chip per level, each keeping its own preset. Until this release the group carried no `jaql` of its own and was dropped without a warning |
 | Numeric-range dashboard filter → chip preset | Mapped | single-sided from/to→`GE`/`LE`, fromNotEqual/toNotEqual→`GT`/`LT`; two-sided keeps BOTH bounds→`BW_INC`/`BW` (incl. mixed inclusive/exclusive — never collapses to one bound); equals→`EQ` (worked example) |
@@ -228,6 +236,8 @@ the original Sisense expression preserved.
 | Two-sided range with mixed inclusive/exclusive bounds | Partial | both bounds retained via `BW_INC`/`BW`; exact boundary inclusivity is approximate (verify live — open-item #5) |
 | Measure-range dashboard filter (filter on a formula/measure not exposed as a column) | Dropped | dropped when the column is not on the model |
 | Cyclic date parts (day-of-week, month-of-year as a `level`) | Dropped | no clean date-bucket equivalent |
+| BloX card that plots nothing (every panel empty) | Dropped | a text banner: no Answer emitted (the `--target-model` path emits its TextBlock text as a note tile); its script cannot change a number, as the card runs no query. A BloX card that plots data stays Flagged (an unmapped widget type) |
 | `richtexteditor` / text widget | Dropped | not a data visual — no Answer emitted (the `--target-model` path emits a note tile) |
+| Measured value or widget filter with a member list on a date column, a relative-date or ranking filter | Flagged | NEEDS REVIEW: no condition form (the measure is left out of the tile, the note names the filter) |
 | Live Sisense REST fetch | Not implemented | offline bundle only (open-item #3) |
 | Locked dashboard filter (`locked: true`) | Dropped | becomes an ordinary editable chip; ThoughtSpot has no locked-chip equivalent in TML that this converter emits |

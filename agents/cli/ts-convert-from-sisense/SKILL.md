@@ -111,11 +111,34 @@ ts sisense build-liveboard --input <bundle.json> --model-name "<Model name>" --o
   [--join-type LEFT_OUTER] [--lower-db-table] [--overrides overrides.json]
 ```
 Widgets become Answers on the tabbed Liveboard: the Sisense widget type picks the chart
-(`chart/column`→COLUMN, `indicator`→KPI, `pivot`→PIVOT_TABLE, …); JAQL panels map to roles
-(Categories→x, Break-by→color, Values→y); a date `level` becomes a matching date bucket
-(`months`→MONTHLY) so it sorts chronologically; a per-attribute top-N is baked into the
-widget answer. The dashboard filter bar becomes cross-viz Liveboard filter chips (member→`in`,
-exclude→`not in`, numeric range→GE/GT/LE/LT/BW_INC/BW/EQ — see the worked example).
+(`chart/column`→COLUMN, `indicator`→KPI with a y axis, `tablewidget` and `tablewidgetagg`→GRID_TABLE, a BloX card that plots nothing→a text banner (skipped, or a note tile with `--target-model`), …); JAQL
+panels map to roles (Categories→x, Break-by→color, Values→y); a date `level` becomes a
+matching date bucket (`months`→MONTHLY) so it sorts chronologically; a per-attribute top-N is
+baked into the widget answer; hidden (`disabled`) panel items are left out. The dashboard
+filter bar becomes cross-viz Liveboard filter chips (member→`in`, exclude→`not in`, numeric
+range→GE/GT/LE/LT/BW_INC/BW/EQ — see the worked example).
+
+Widget measures become **Answer formulas** (rules in the mapping doc, "Widget measures →
+Answer formulas"):
+- a **measured value** `(count([id]), [Status])` → `group_aggregate ( unique_count_if (
+  [Status] = 'HIRED' , [id] ) , … , query_filters ( ) - { [Status] } )`: its own filter
+  replaces any filter on that column, as in Sisense;
+- a **widget filter** goes into the search, except on a column that also has a dashboard
+  filter: a Liveboard filter on a column replaces the tile's filter, so there it is folded into
+  each measure as a condition;
+- **`metadata.ignore`** (dashboard filters the widget does not take) → `group_aggregate ( agg ,
+  { } , query_filters ( ) - { [col] } )`, and `ignore.all` → `group_aggregate ( agg , { } , { } )`
+  (`query_groups ( )` instead of `{ }` on a grouped chart);
+- a **pivot** with no Columns panel, or whose Columns dimension has a member list, is emitted as
+  a flat GRID_TABLE (one conditional measure per member): PIVOT_TABLE refuses a large unfiltered
+  result. A pivot whose column values are unknown is kept and noted — flatten it by hand if its
+  rows are high-cardinality.
+
+### When a Sisense table becomes a hand-written SQL view
+The CLI does not emit SQL views. When you rebuild a Sisense custom table or cube as a
+ThoughtSpot SQL view that `UNION`s timestamp columns from several sources, cast every
+timestamp branch to one type — on Snowflake `::TIMESTAMP_NTZ`: a union mixing NTZ with TZ/LTZ
+columns fails there (open-item #10).
 
 Each Answer is emitted via the shared emitter's `build_answer` using the Sisense-resolved
 chart type directly, so the widget-type mapping wins and the Approximated / NEEDS REVIEW
@@ -253,6 +276,7 @@ widgets, unresolved fields) for manual rebuild.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.0 | 2026-11-28 | **Widget measures, measured values and filter scope (ts-cli v0.229.0).** A widget's formula measures become Answer formulas (indicators reach ThoughtSpot as KPI tiles with a y axis); a measured value `(agg, [Dim])` becomes `group_aggregate` over a conditional aggregate instead of a verbatim tuple; widget filters reach the search, or fold into the measures where a Liveboard filter shares the column; `metadata.ignore` becomes a `group_aggregate` filter set; hidden panel items are dropped (open-item #9). A BloX card that plots nothing is read as a text banner, and `tablewidgetagg` maps to `GRID_TABLE`. On 11 production dashboards: 66 of 69 data widgets clean, from 30 of 75. |
 | 1.1.1 | 2026-11-27 | **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
 | 1.1.0 | 2026-11-27 | **Bind a dashboard to an existing Model (`build-liveboard --target-model`).** Fields resolve by table instance + column through role copies and relation keys; Sisense `count` is a distinct count; widget filters, tab sets, titles, rich text, layout and jump-to-dashboard drills are carried; chips use the exported-Liveboard shape (`in` / `not in`) with `excluded_visualizations`; `verify-render` lists suspect tiles. Cascading dashboard filter groups (Region > Country > City) become one chip per level instead of being dropped; measures show full values, not ThoughtSpot's abbreviated default. Viz binding uses the Model's exported `obj_id`, and a derived obj_id now drops parentheses and commas as the server does. Rebuilt live from a 31-widget dashboard (lint clean, import OK, every tile renders); the report flags what still needs a decision there. An allowlist at every level of the dashboard export and of the target Model (its filters, join types, join_progressive, column properties and warehouse tables) decides what is carried; anything not read or not verified is NEEDS REVIEW on the chip and every tile it affects, and an accounting gate names any plotted field a tile does not show. |
 | 1.0.9 | 2026-11-27 | **A conditional that an operator follows is bracketed (ts-cli v0.225.2, BL-649).** ThoughtSpot's `else` is greedy: `if ( c ) then a else b + 1` adds 1 only on the else branch (BL-632, live-verified). `IF([a] > 1, 1, 0) = 1` converted to `if (…) then 1 else 0 = 1`, marked Migrated. It is now `( if (…) then 1 else 0 ) = 1`. A conditional standing alone is unchanged |

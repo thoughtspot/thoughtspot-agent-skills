@@ -1,4 +1,4 @@
-<!-- currency: sisense — 2026-07 (Sisense L2024.x JAQL); 2026-08-26 finding 14.3: COUNT_DISTINCT axis corrected -- Sisense count==distinct and countduplicates==exact total, so BOTH are exact; the doc had reversed it in four places while functions.py (declared authoritative here) had it right -->
+<!-- currency: sisense — 2026-11 (Sisense L2024.x JAQL; 2026-11-26 measured values + widget filter scope verified against a production Sisense migration and live imports); 2026-08-26 finding 14.3: COUNT_DISTINCT axis corrected -- Sisense count==distinct and countduplicates==exact total, so BOTH are exact; the doc had reversed it in four places while functions.py (declared authoritative here) had it right -->
 # Sisense JAQL → ThoughtSpot formula translation
 
 The translation map behind `ts sisense build-model`. The authoritative source is
@@ -76,6 +76,52 @@ A JAQL formula references fields through `[key]` placeholders resolved against a
   (`agg([Column])`).
 - A nested `{formula, context}` fragment recurses; an unsupported nested formula makes the whole
   formula NEEDS REVIEW.
+
+## Widget measures → Answer formulas (`ts sisense build-liveboard`)
+
+A widget's measures (an indicator's value, a chart's Values, a pivot's Values) are emitted as
+**Answer formulas** named after the widget item. A plain `agg` over a column that is already
+a Model `SUM` measure stays that column when nothing scopes it; everything else is a formula.
+Code: `ts_cli/sisense/widget_fields.py` and `ts_cli/sisense/scope.py`.
+
+### Measured values
+
+`(agg, [Dim])` is a measured value: the aggregate restricted by `[Dim]`'s own filter in the
+formula context. In Sisense that filter **replaces** any dashboard or widget filter on the same
+column (verified on a live cube: a HIRED measured value kept its count under a
+`Status = APPLIED` widget filter). So:
+
+| Sisense | ThoughtSpot |
+|---|---|
+| `(count([id]), [Status])`, `[Status]` members `['HIRED']` | `group_aggregate ( unique_count_if ( [Status] = 'HIRED' , [id] ) , query_groups ( ) , query_filters ( ) - { [Status] } )` |
+| `(sum([amt]), [Flag], [Type])` | `group_aggregate ( sum_if ( ( [Flag] = 1 ) and ( [Type] = 'X' ) , [amt] ) , … , query_filters ( ) - { [Flag] , [Type] } )` |
+| `(count([id]), [Status]) / count([id])` | the measured value as above `/` `unique count([id])` (only the measured part is scoped) |
+
+Members are literals; on a `numeric` JAQL item a numeric member is emitted bare (`[Flag] = 1`;
+JAQL sends `"1"`, and `[Flag] = '1'` does not compile against a number column). Several
+members → `[c] in { 'a' , 'b' }`; `exclude` → `!=` / `not ( [c] in { … } )`; a `from`/`to`
+range → comparisons joined by `and`; an `all` filter restricts nothing but still drops the
+query filter on the column. `count` → `unique_count_if`, `sum` → `sum_if`, `dupCount` →
+`count_if`; other aggregates use `agg ( if ( cond ) then x else null )`. A member list on a
+datetime column, a relative-date or ranking filter → **NEEDS REVIEW**.
+
+Before 2026-11-26 the tuple was copied through verbatim as `(unique count([id]),[Status])`
+and reported Migrated; ThoughtSpot cannot parse it.
+
+### Widget filters and ignored dashboard filters
+
+| Sisense | ThoughtSpot |
+|---|---|
+| Widget filter on a column with **no** Liveboard filter | search tokens: `[c] = 'a' 'b'`, `[c] != 'a'`, `[n] >= 5` |
+| Widget filter on a column that **also** has a dashboard filter | folded into every measure as a condition (`unique_count_if ( [c] = 'a' , [id] )`), because a Liveboard filter on a column replaces the tile's own filter there; Sisense applies both |
+| `metadata.ignore.ids` / `.dimensions` (dashboard filters the widget does not take) | each aggregate → `group_aggregate ( agg , G , query_filters ( ) - { [col] … } )` |
+| `metadata.ignore.all` | each aggregate → `group_aggregate ( agg , G , { } )` |
+
+`G` is `{ }` for a single-value widget (indicator) and `query_groups ( )` otherwise. Inside a
+measured value the tile condition is applied too, except on the measured value's own columns.
+All of these were imported on a cluster and every tile read back against direct SQL
+(`ts-convert-from-sisense` open-item #6, and the Liveboard-filter table in
+[thoughtspot-formula-patterns.md](../../schemas/thoughtspot-formula-patterns.md#group_aggregate)).
 
 ## `round` (BL-331)
 

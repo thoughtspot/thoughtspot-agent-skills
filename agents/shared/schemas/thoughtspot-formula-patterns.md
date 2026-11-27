@@ -688,6 +688,26 @@ pinned on a *derived* boolean formula built from that column — the query-filte
 provenance tracks the column the filter predicate was actually applied to, not that
 column's underlying physical dependency.
 
+**Liveboard filters, live-verified 2026-11-26 (ps-internal, Answer formulas on a Liveboard
+over Databricks; every number reconciled with direct SQL):**
+
+| Formula on a KPI tile | Liveboard filter `[Status] = 'X'` | Liveboard filter `[Region] = 'Y'` |
+|---|---|---|
+| `group_aggregate ( unique count ( [id] ) , { } , query_filters ( ) - { [Status] } )` | ignored (value unchanged) | applied |
+| `group_aggregate ( unique count ( [id] ) , { } , { } )` | ignored | ignored |
+| `group_aggregate ( unique_count_if ( [Status] = 'A' , [id] ) , query_groups ( ) , query_filters ( ) - { [Status] } )` in a grouped table | ignored; rows keep their grouping | applied |
+
+A subtraction set may name several columns (`query_filters ( ) - { [a] , [b] }`), and the
+first argument may be a conditional aggregate (`sum_if`, `unique_count_if`). This is how the
+Sisense converter carries a widget's ignored dashboard filters and a measured value's own
+filter (`agents/shared/mappings/sisense/sisense-formula-translation.md`).
+
+**A Liveboard filter on a column replaces a tile's own filter on that column** (the tile's
+`[Status] = 'A'` search filter is overridden, not intersected). To keep both, fold the tile
+filter into the measure (`unique_count_if ( [Status] = 'A' , [id] )`): under a Liveboard
+filter `[Status] = 'B'` that returns 0, the intersection, where the search filter would show
+the B count.
+
 ### `group_*` Shorthand Functions
 
 Sugar for `group_aggregate` with `query_filters()` as the filter argument:
