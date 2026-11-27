@@ -188,6 +188,14 @@ def _with_week_note(annotations: list[dict] | None, ts_expr: str | None) -> list
     return out
 
 
+_WHOLE_TABLE_LOD_NOTE = (
+    "AGG(...) OVER () -> group_aggregate ( … , { } , { } ): one value over the "
+    "whole (MV-filtered) source, blind to the query's grouping and search "
+    "filters (live-verified 2026-11-26 on its own and grouped on). Do not "
+    "compare a row-level value to it in another formula: ThoughtSpot's SQL for "
+    "that flag is wrong (BL-638).")
+
+
 def translate_dimension(dim: dict, tables: dict) -> dict:
     """Translate one parsed dimension. Raises UntranslatableError to skip."""
     kind = dim["kind"]
@@ -212,6 +220,14 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
             f"(SUM|COUNT|AVG|MIN|MAX|MEDIAN — ts-databricks-formula-translation.md)")
     resolver = make_resolver(tables)
     inner = translate_sql_expr(dim["inner_expr"], resolver)
+    if not dim["partition_by"]:
+        # BL-635: OVER () is whole-table and blind to the query's filters, as
+        # in Databricks; { } still respects the model filter that build-model
+        # mirrors from the MV filter: (A3), which the window also sees.
+        return _entry(dim["name"], "dimension", "formula", "ATTRIBUTE", dim,
+                      ts_expr=f"group_aggregate ( {agg} ( {inner} ) , {{ }} , {{ }} )",
+                      annotations=[{"kind": "whole_table_lod",
+                                    "detail": _WHOLE_TABLE_LOD_NOTE}])
     dims = " , ".join(resolver(p) for p in dim["partition_by"])
     ts = (f"group_aggregate ( {agg} ( {inner} ) , {{ {dims} }} , "
           f"query_filters ( ) )")

@@ -30,6 +30,12 @@ _DATE_TRUNC_DIM_RE = re.compile(
     r"^DATE_TRUNC\s*\(\s*'(\w+)'\s*,\s*(.+?)\s*\)\s*$", re.IGNORECASE | re.DOTALL)
 _PLAIN_COLUMN_RE = re.compile(
     r"^(?:`[^`]+`|[A-Za-z_][\w$]*)(?:\.(?:`[^`]+`|[A-Za-z_][\w$]*))*$")
+# BL-634: a date built from an integer key, TO_DATE(CAST(key AS STRING), 'yyyyMMdd').
+# A digits-only, most-significant-first format sorts the integer exactly as the
+# date, so the window is ordered by the key column itself.
+_INT_KEY_DATE_RE = re.compile(
+    r"^(?i:TO_DATE)\s*\(\s*(?i:CAST)\s*\(\s*(.+?)\s+(?i:AS)\s+(?i:STRING)\s*\)"
+    r"\s*,\s*'(yyyyMMdd|yyyyMM)'\s*\)\s*$", re.DOTALL)  # format case-sensitive: mm = minutes
 _MOVING_FN = {"SUM": "moving_sum", "AVG": "moving_average",
               "MIN": "moving_min", "MAX": "moving_max"}
 _CUMULATIVE_FN = {"SUM": "cumulative_sum", "AVG": "cumulative_average",
@@ -127,7 +133,18 @@ def translate_window_measure(measure: dict, dimensions: list[dict],
             f"range '{window['raw_range']}' over the derived order dimension "
             f"'{window['order']}' has no verified mapping (only range: current "
             f"is verified with a formula-ordered window)")
+    if order.get("int_key") and (rng["type"] != "current"
+                                 or window["offset"] is not None):
+        raise UntranslatableError(
+            f"window order dimension '{window['order']}' is a date built from an "
+            f"integer key: it orders the window exactly, but only range: current "
+            f"without an offset is mapped (a date interval cannot be counted on "
+            f"the key)")
     annotations: list[dict] = []
+    if order.get("int_key"):
+        annotations.append({"kind": "order_by_int_key", "detail": (
+            f"window ordered by the integer key behind '{window['order']}' "
+            f"(TO_DATE(CAST(key AS STRING), 'yyyyMMdd') sorts as the key does)")})
     if rng["type"] in ("trailing", "leading"):
         wrap = _moving_wrap(window, order, annotations)
     elif rng["type"] == "cumulative":
@@ -205,6 +222,12 @@ def _find_order_dim(order_name: str, dimensions: list[dict],
             if unit in _GRAIN_MONTHS:
                 ref = resolver(inner)
                 return {"grain": unit, "sort_ref": ref, "date_ref": ref}
+        k = _INT_KEY_DATE_RE.match(stripped)
+        if k and _PLAIN_COLUMN_RE.match(k.group(1).strip()):
+            # Ordering only: the key is not a date, so no date_ref (a date
+            # interval or a scalar MAX stand-in cannot use it).
+            return {"grain": "day", "sort_ref": resolver(k.group(1).strip()),
+                    "date_ref": None, "int_key": True}
         shifted = _shifted_trunc_unit(stripped)
         if shifted is not None:
             unit, column = shifted
