@@ -12,7 +12,9 @@ output and checks the migration report:
      ranking kept as `bottom N`, a disabled widget filter reported and not applied, a disabled
      dashboard filter reported Skipped, and a chip on a column the Model lacks reported NEEDS
      REVIEW rather than dropped.
-  4. the same bundle against the Model with a LEFT_OUTER join: the grouped tiles and a
+  4. `render_report_html.py` renders that run: the hero counts only Migrated/Approximated/Merged
+     widgets, NEEDS REVIEW is counted on its own, and a run with no read-back says preview.
+  5. the same bundle against the Model with a LEFT_OUTER join: the grouped tiles and a
      board-level join-type row are NEEDS REVIEW (Sisense relations are INNER by default).
 
 Everything is synthetic and written to a temp dir. No live ThoughtSpot or Sisense connection.
@@ -30,6 +32,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _common import SmokeTestResult  # noqa: E402
+
+RENDERER = (Path(__file__).resolve().parents[2] / "agents" / "cli" / "ts-convert-from-sisense"
+            / "scripts" / "render_report_html.py")
 
 MODEL_TML = """\
 model:
@@ -171,6 +176,25 @@ def main() -> int:
         ok, statuses = r.step("migration report carries every decision", _report)
         if ok:
             r.info(f"statuses: {json.dumps(statuses)}")
+
+        def _render():
+            page = tmp_path / "report.html"
+            res = subprocess.run([sys.executable, str(RENDERER), "--bundle", str(bundle), "--out-dir", str(out),
+                                  "--target-model", str(model), "--html", str(page)],
+                                 capture_output=True, text=True, timeout=120)
+            _check(res, "render_report_html.py")
+            html = page.read_text(encoding="utf-8")
+            review = sum(1 for k in ("Total Cost", "Cheapest Statuses", "Cost by Status") if statuses[k] == "NEEDS REVIEW")
+            done = 3 - review
+            assert f'<div class="hero-figure">{done}<small>/3</small></div>' in html, "hero counts a NEEDS REVIEW widget as done"
+            assert f'Needs review</div><div class="stat-value">{review}</div>' in html, "NEEDS REVIEW count is wrong"
+            assert "Preview" in html and "read back off the cluster after import" not in html, "preview run claims live data"
+            assert "Migrated</span>" not in html, "a NEEDS REVIEW widget is shown as Migrated"
+            return review
+
+        ok, n = r.step("render_report_html.py shows NEEDS REVIEW as not done, in preview", _render)
+        if ok:
+            r.info(f"report page: {3 - n} of 3 widgets done, {n} need review, preview")
 
         def _left_outer():
             model.write_text(_export("LEFT_OUTER"), encoding="utf-8")

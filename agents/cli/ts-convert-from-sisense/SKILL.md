@@ -247,25 +247,26 @@ Approximated / NEEDS REVIEW / Skipped), plus `warnings`. Hand it to the user as 
 deliverable, calling out every NEEDS REVIEW row (window/time-intelligence formulas, unknown
 widgets, unresolved fields) for manual rebuild.
 
-On the `--target-model` path the report is `migration-report.json`. Also render the one-page
-HTML report people read, with the same sections and look as the Power BI skill's report:
-coverage of the dashboard's data widgets, what shipped, source-dashboard findings, how the model
-was adapted, every NEEDS REVIEW reason grouped board-wide vs tile-specific, and folded per-widget
-detail.
+On the `--target-model` path the report is `migration-report.json`. To hand it to people, also
+render it as one self-contained HTML page. Run the script with the Python that has ts-cli
+installed: it reads the bundle through the converter's own parser and the target Model through
+its own `--target-model` reader.
 
 ```bash
 python3 scripts/render_report_html.py --bundle <bundle.json> --out-dir out/ \
-  --target-model target-model.json [--overrides overrides.json] \
+  [--target-model target-model.json] [--overrides overrides.json] \
   [--readback readback.json] [--dropped dropped.json] [--reconcile reconcile.json] \
   [--notes notes.json] [--title "<dashboard>"] [--board-url <url>] --html report.html
 ```
 
-Without `--readback` (the imported board's tiles read back off the cluster) the page says it is a
-preview, never that anything is live. Report-specific facts the converter cannot derive (a defect
-in the source dashboard and its evidence, an adaptation decided with the customer, a Sisense-side
-reconciliation) go in `--notes`, never in the script. A tile `ts tml lint` reports as blank (no
-`axis_configs` because its only measure was not carried) is held back from the import and listed
-with `--dropped`, not shipped empty.
+The page takes each data widget's outcome from its row status in `migration-report.json`:
+NEEDS REVIEW is counted on its own and never shown as carried, and every row's note is printed in
+full (labels only group them). Without `--readback` the page is a preview and says so; with it, a
+tile counts as returning data only when its read-back row count is a number above 0, and a tile
+title two tiles share is reported as ambiguous rather than matched. `--dropped` lists tiles the
+user left out of the import. Report-specific facts the converter cannot derive (a defect in the
+source dashboard and its evidence, an adaptation decided with the customer, a Sisense-side
+reconciliation) go in `--notes`, never in the script.
 
 ---
 
@@ -273,7 +274,7 @@ with `--dropped`, not shipped empty.
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.2.0 | 2026-11-27 | **One-page HTML migration report (Step 4).** `agents/cli/ts-convert-from-sisense/scripts/render_report_html.py` renders a `--target-model` run as one self-contained page in the Power BI skill's report format: coverage of the dashboard's data widgets, what shipped, source-dashboard findings, how the model was adapted, NEEDS REVIEW reasons grouped board-wide vs tile-specific, an optional reconciliation and folded per-widget detail. Report-specific facts come from `--notes`; without `--readback` the page says it is a preview; tiles held back before import are listed via `--dropped`. Display only: emitted TML and classifications are unchanged. |
+| 1.2.0 | 2026-11-27 | **One-page HTML migration report (Step 4).** `agents/cli/ts-convert-from-sisense/scripts/render_report_html.py` renders a `--target-model` run's `migration-report.json` as one self-contained page: each data widget's outcome is its row status, NEEDS REVIEW is counted separately and never shown as carried, every converter note is printed in full, and the page says preview unless `--readback` shows a tile returned rows. Report-specific facts come from `--notes`. Display only: emitted TML and classifications are unchanged. |
 | 1.1.1 | 2026-11-27 | **A change of meaning needs approval (R1, BL-640).** If a converted formula was edited by hand during the run to get past an import error, a lint finding or a number mismatch, and its meaning now differs from the source, the step before import lists each one (source, formula, the difference) and waits for the user to approve it. The rule is in `ts-model-conversion-invariants.md` R1. |
 | 1.1.0 | 2026-11-27 | **Bind a dashboard to an existing Model (`build-liveboard --target-model`).** Fields resolve by table instance + column through role copies and relation keys; Sisense `count` is a distinct count; widget filters, tab sets, titles, rich text, layout and jump-to-dashboard drills are carried; chips use the exported-Liveboard shape (`in` / `not in`) with `excluded_visualizations`; `verify-render` lists suspect tiles. Cascading dashboard filter groups (Region > Country > City) become one chip per level instead of being dropped; measures show full values, not ThoughtSpot's abbreviated default. Viz binding uses the Model's exported `obj_id`, and a derived obj_id now drops parentheses and commas as the server does. Rebuilt live from a 31-widget dashboard (lint clean, import OK, every tile renders); the report flags what still needs a decision there. An allowlist at every level of the dashboard export and of the target Model (its filters, join types, join_progressive, column properties and warehouse tables) decides what is carried; anything not read or not verified is NEEDS REVIEW on the chip and every tile it affects, and an accounting gate names any plotted field a tile does not show. |
 | 1.0.9 | 2026-11-27 | **A conditional that an operator follows is bracketed (ts-cli v0.225.2, BL-649).** ThoughtSpot's `else` is greedy: `if ( c ) then a else b + 1` adds 1 only on the else branch (BL-632, live-verified). `IF([a] > 1, 1, 0) = 1` converted to `if (…) then 1 else 0 = 1`, marked Migrated. It is now `( if (…) then 1 else 0 ) = 1`. A conditional standing alone is unchanged |
