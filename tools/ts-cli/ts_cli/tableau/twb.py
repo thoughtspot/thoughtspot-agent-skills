@@ -295,7 +295,9 @@ def parse_twb(twb_path: str | Path) -> dict:
         # Modern Tableau stores joins as logical relationships (the "noodle"), not physical
         # <relation join=...>; pick those up too, or a multi-table model imports with no join
         # and ThoughtSpot rejects it. See reference-tableau-model-discovery-algorithm.
-        joins += _extract_noodle_joins(ds, sql_views)
+        noodle_joins, noodle_warnings = _extract_noodle_joins(ds, sql_views, tables)
+        joins += noodle_joins
+        join_warnings += noodle_warnings
         calcs, calc_map = _extract_calculated_fields(ds)
         col_table_map = _build_column_table_map(ds, tables)
         sets = extract_sets(ds)
@@ -807,68 +809,10 @@ from ts_cli.tableau.joins import (  # noqa: E402,F401
 )
 
 
-def _detail_id_count(view: dict) -> int:
-    """Count detail-grain id columns (`*_id` / `* id`) in a view's output.
-
-    The MANY side of a join has finer grain — it carries more identifier columns
-    (e.g. driver-events has fleet_account_id AND driver_id; the account-level KI
-    breakdown has only fleet_account_id). Robust where GROUP-BY arity isn't (pivot
-    CTEs group positionally). The join key counts too, but the finer table has strictly
-    more, so the comparison still orders them correctly."""
-    n = 0
-    for c in view.get("columns", []):
-        name = (c.get("sql_output_column") or c.get("name") or "").lower().strip()
-        if re.search(r"(^|[ _])id$", name):
-            n += 1
-    return n
-
-
-def _extract_noodle_joins(ds: ET.Element, sql_views: list[dict]) -> list[dict]:
-    """Extract logical-relationship ("noodle") joins from `<relationships>`.
-
-    Modern Tableau stores joins as logical relationships in
-    `<object-graph>/<relationships>`, NOT as physical `<relation join=...>`. Each
-    `<relationship>/<expression op="=">` holds two column refs of the form
-    `[<col> (<Table Name>)]`; the parenthesised suffix identifies each side's table.
-
-    Tableau defers cardinality to query time, so it is (almost always) absent from the
-    file. We infer the MANY side from CTE grain — the table whose Custom SQL has more
-    terms in its final `GROUP BY` is finer-grained (MANY). This is a heuristic; a
-    post-build double-count check is the proof (see reference-tableau-model-discovery-algorithm).
-    """
-    grain = {v.get("name"): _detail_id_count(v) for v in sql_views}
-    ref_re = re.compile(r"^(.*?)\s*\((.+)\)\s*$")
-
-    def parse_ref(op: str) -> tuple[str, Optional[str]]:
-        s = (op or "").strip().strip("[]")
-        m = ref_re.match(s)
-        return (m.group(1).strip(), m.group(2).strip()) if m else (s, None)
-
-    joins = []
-    for rel in ds.findall(".//relationships/relationship"):
-        eq = rel.find("./expression[@op='=']")
-        if eq is None:
-            continue
-        exprs = eq.findall("./expression")
-        if len(exprs) < 2:
-            continue
-        lcol, ltab = parse_ref(exprs[0].get("op", ""))
-        rcol, rtab = parse_ref(exprs[1].get("op", ""))
-        if not (ltab and rtab):
-            continue
-        # MANY side = finer grain (more detail id columns). Orient left=MANY, right=ONE.
-        la, ra = grain.get(ltab, 0), grain.get(rtab, 0)
-        if ra > la:                       # right is finer → right is MANY → swap
-            ltab, rtab, lcol, rcol = rtab, ltab, rcol, lcol
-        joins.append({
-            "type": "INNER",
-            "left_table": ltab,           # MANY side
-            "right_table": rtab,          # ONE side
-            "keys": [{"left": lcol, "right": rcol}],
-            "cardinality": "MANY_TO_ONE",
-            "_source": "noodle",
-        })
-    return joins
+from ts_cli.tableau.noodle_joins import (  # noqa: E402,F401
+    _detail_id_count,
+    _extract_noodle_joins,
+)
 
 
 def _extract_calculated_fields(ds: ET.Element) -> tuple[list[dict], dict[str, str]]:

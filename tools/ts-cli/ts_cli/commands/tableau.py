@@ -991,21 +991,19 @@ def _generate_flow(
 
 
 def _load_table_name_map(
-    table_name_map: Optional[str],
-    existing_guid: Optional[str],
-) -> dict[str, str]:
-    """Load the --table-name-map JSON file, if provided; exits on a bad path.
-
-    GENERATE-mode-only option — echoes a heads-up to stderr (but does not
-    error) when combined with --existing-guid, since merge mode ignores it.
-    """
+    table_name_map: Optional[str], existing_guid: Optional[str], ds_names: list[str],
+) -> dict[str, dict]:
+    """Load --table-name-map as ``{datasource or "": map}`` (see
+    build_model.resolve_table_name_maps); exits on a bad path or document.
+    GENERATE mode only: merge mode ignores it, with a heads-up on stderr."""
     if not table_name_map:
         return {}
-    tnm_path = Path(table_name_map)
-    if not tnm_path.exists():
-        typer.echo(f"Table name map file not found: {table_name_map}", err=True)
+    from ts_cli.tableau.build_model import read_table_name_maps
+    try:
+        name_map = read_table_name_maps(table_name_map, ds_names)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
         raise SystemExit(1)
-    name_map: dict[str, str] = json.loads(tnm_path.read_text())
     if existing_guid:
         typer.echo(
             "--table-name-map is ignored with --existing-guid "
@@ -1020,7 +1018,7 @@ def _process_datasource(
     model_name: Optional[str],
     connection_name: str,
     parsed: dict,
-    name_map: dict,
+    name_map: Optional[dict],
     col_name_map: dict,
     existing_guid: Optional[str],
     profile: Optional[str],
@@ -1094,9 +1092,10 @@ def _process_datasource(
                 "(merge mode already resolves columns against the existing model)",
                 err=True,
             )
-    elif name_map:
+    elif name_map is not None:  # a datasource with no entry reports 0 mapped
+        applied = sum(t["name"] in name_map for t in ds["tables"])
         ds, scoped_columns = apply_table_name_map(ds, scoped_columns, name_map)
-        typer.echo(f"  Applied table name map ({len(name_map)} entries)", err=True)
+        typer.echo(f"  Table name map: {applied} of {len(ds['tables'])} table(s) mapped", err=True)
 
     # Build dependency levels from raw calcs (before resolution strips refs)
     raw_levels = build_formula_levels(ds["calculated_fields"], ds["calc_map"])
@@ -1231,10 +1230,8 @@ def build_model_cmd(
                                           "budget is for genuine server-side rejections."),
     table_name_map: Optional[str] = typer.Option(
         None, "--table-name-map",
-        help="GENERATE mode only (no --existing-guid). JSON file mapping TWB "
-             "physical table name -> ThoughtSpot table TML name, for when they "
-             "differ (warehouse-normalized names, sqlproxy/published-datasource "
-             "scoping). Ignored when --existing-guid is set.",
+        help="GENERATE mode only. JSON mapping TWB table name -> ThoughtSpot "
+             "table, optionally keyed by datasource; shapes in the README.",
     ),
     reconcile_table: Optional[str] = typer.Option(
         None, "--reconcile-table",
@@ -1284,7 +1281,6 @@ def build_model_cmd(
         typer.echo(f"File not found: {twb_file}", err=True)
         raise SystemExit(1)
 
-    name_map = _load_table_name_map(table_name_map, existing_guid)
     col_name_map = _load_column_name_map(column_name_map)
 
     out_path = Path(output_dir)
@@ -1332,6 +1328,9 @@ def build_model_cmd(
     # `_write_table_tml_files`'s docstring for the live-reproduced bug this
     # closes (TableauSetControlUseCases.twbx "Sub-Category" XREF).
     table_registry: dict = {}
+    from ts_cli.tableau.build_model import table_name_map_for
+    name_maps = _load_table_name_map(
+        table_name_map, existing_guid, [d["name"] for d in parsed["datasources"]])
 
     all_results = []
     for ds in datasources:
@@ -1340,7 +1339,7 @@ def build_model_cmd(
             model_name=model_name,
             connection_name=connection_name,
             parsed=parsed,
-            name_map=name_map,
+            name_map=table_name_map_for(name_maps, ds["name"]),
             col_name_map=col_name_map,
             existing_guid=existing_guid,
             profile=profile,

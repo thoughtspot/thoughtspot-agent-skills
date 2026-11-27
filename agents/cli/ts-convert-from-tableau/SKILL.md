@@ -1103,10 +1103,9 @@ This writes, per datasource, `{slug}.phase0.model.tml` (base — no formulas) an
 formulas are added independently in Phase 2 via `build-model --existing-guid` **per model**
 (inherently one-call-per-GUID, unaffected by the "one call" rule above).
 
-`--table-name-map` (optional): a workbook-wide JSON file `{"twb_table_name":
-"thoughtspot_table_name"}`. Supply it **only** when the ThoughtSpot table's TML `name`
-(Step 5a) differs from the TWB relation name (warehouse-normalized names, or a published
-datasource literally named `sqlproxy`); omit when names already match.
+`--table-name-map` (optional, only when names differ): `{"twb_table": "ts_table"}`, or
+keyed by datasource when two published datasources both parse to `sqlproxy`; a target
+`{"name", "db_table"}` sets a display name (shapes: ts-cli README).
 
 **Published/sqlproxy datasources bound to an existing table/view — reconcile columns.**
 When the datasource binds to a pre-existing ThoughtSpot table/view (the consultant/stand-in
@@ -2514,6 +2513,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.47.3 | 2026-11-27 | Step 7 asks for approval of any hand-edited formula whose meaning differs from the source (invariant R1, BL-640). |
+| 1.49.0 | 2026-11-27 | `--table-name-map` keyed by datasource, with a separate display name; cast-wrapped relationship keys no longer invent joins (ts-cli v0.230.0). |
 
-**Older entries (v1.0.0–v1.47.2):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.47.3):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

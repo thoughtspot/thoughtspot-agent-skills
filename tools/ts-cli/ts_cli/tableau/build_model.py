@@ -96,10 +96,85 @@ def _remap_multi_table(
     return fixed_scoped, f"Remapped {remapped}/{len(scoped_columns)} sqlproxy columns"
 
 
+_TARGET_KEYS = frozenset({"name", "db_table"})
+
+
+def _is_table_target(value) -> bool:
+    """A table-name-map target: a non-empty name, or {"name"?, "db_table"?} strings."""
+    if isinstance(value, str):
+        return bool(value)
+    return (isinstance(value, dict) and bool(value) and set(value) <= _TARGET_KEYS
+            and all(isinstance(v, str) and v for v in value.values()))
+
+
+def _table_target(value) -> dict:
+    """Normalise a target to {"name", "db_table"}; db_table None keeps the parsed one."""
+    if isinstance(value, str):
+        return {"name": value, "db_table": value}
+    return {"name": value.get("name") or value["db_table"], "db_table": value.get("db_table")}
+
+
+def resolve_table_name_maps(raw: dict, datasource_names: list[str]) -> dict[str, dict]:
+    """Validate a ``--table-name-map`` document; returns ``{datasource or "": map}``.
+
+    Each top-level key is either a TWB table name with a target (the flat form,
+    applied to every datasource), or a datasource name whose value is its own
+    ``{TWB table: target}`` map, which overrides the flat entries for that
+    datasource. Two datasources that both parse to ``sqlproxy`` need the second
+    form to land on different tables. A target is a name (the ThoughtSpot table
+    name and the physical ``db_table``), or ``{"name": ..., "db_table": ...}``
+    to set them separately; either key may be left out.
+
+    Raises ``ValueError`` naming the problem: a document that is not an object,
+    a malformed target, or a nested map under a key that names no datasource.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("expected a JSON object")
+    names = set(datasource_names)
+    maps: dict[str, dict] = {"": {}}
+    for key, value in raw.items():
+        if key in names and isinstance(value, dict) and not _is_table_target(value):
+            bad = [k for k, v in value.items() if not _is_table_target(v)]
+            if bad:
+                raise ValueError(f"datasource {key!r}: bad target for {', '.join(map(repr, bad))}")
+            maps[key] = dict(value)
+        elif _is_table_target(value):
+            maps[""][key] = value
+        elif isinstance(value, dict):
+            raise ValueError(
+                f"{key!r} is not a datasource in this workbook "
+                f"(available: {', '.join(sorted(names))})"
+            )
+        else:
+            raise ValueError(f"{key!r}: a target is a table name or "
+                             '{"name": ..., "db_table": ...}')
+    return maps
+
+
+def read_table_name_maps(path: str, datasource_names: list[str]) -> dict[str, dict]:
+    """Read a ``--table-name-map`` file through resolve_table_name_maps;
+    ``ValueError`` names the file (missing, not JSON, or malformed)."""
+    import json
+    from pathlib import Path
+    if not Path(path).exists():
+        raise ValueError(f"Table name map file not found: {path}")
+    try:
+        return resolve_table_name_maps(json.loads(Path(path).read_text()), datasource_names)
+    except ValueError as exc:  # includes json.JSONDecodeError
+        raise ValueError(f"--table-name-map {path}: {exc}") from exc
+
+
+def table_name_map_for(maps: dict[str, dict], datasource_name: str) -> dict | None:
+    """One datasource's map: the flat entries, overridden by its own; None with no map."""
+    if not maps:
+        return None
+    return {**maps.get("", {}), **maps.get(datasource_name, {})}
+
+
 def apply_table_name_map(
     ds: dict,
     scoped_columns: dict[str, str],
-    name_map: dict[str, str],
+    name_map: dict,
 ) -> tuple[dict, dict[str, str]]:
     """Remap TWB physical table names to actual ThoughtSpot table TML names.
 
@@ -110,9 +185,10 @@ def apply_table_name_map(
     the real physical table name.
 
     Renames, everywhere a TWB table name feeds the generated model TML:
-      - ``ds["tables"][].name`` and ``.db_table`` (both become the mapped
-        name — see ``build_model_tml``'s ``model.tables[].fqn`` construction,
-        which reads ``t.get("db_table", t["name"])``)
+      - ``ds["tables"][].name`` (the target's ``name``) and ``.db_table`` (its
+        ``db_table``; a name-only target keeps the parsed one) — see
+        ``build_model_tml``'s ``model.tables[].fqn`` construction, which reads
+        ``t.get("db_table", t["name"])``
       - ``ds["joins"][].left_table`` / ``.right_table``
       - ``ds["columns"][].table``, when present (defensive — the TWB parser
         does not currently populate this key, but ``build_model_tml`` honors
@@ -128,18 +204,24 @@ def apply_table_name_map(
     if not name_map:
         return ds, scoped_columns
 
+    # A target is a name (sets both `name` and `db_table`) or
+    # {"name": <ThoughtSpot table name>, "db_table": <physical table>}; see
+    # resolve_table_name_maps. Joins, columns and scopes take the `name`.
+    targets = {k: _table_target(v) for k, v in name_map.items()}
+
     def _remap(table_name: str) -> str:
-        return name_map.get(table_name, table_name)
+        target = targets.get(table_name)
+        return target["name"] if target else table_name
 
     new_tables = []
     for t in ds.get("tables", []):
-        mapped = name_map.get(t["name"])
-        if mapped is None:
+        target = targets.get(t["name"])
+        if target is None:
             new_tables.append(t)
             continue
         nt = dict(t)
-        nt["name"] = mapped
-        nt["db_table"] = mapped
+        nt["name"] = target["name"]
+        nt["db_table"] = target["db_table"] or t.get("db_table") or t["name"]
         new_tables.append(nt)
 
     new_joins = []
@@ -151,9 +233,9 @@ def apply_table_name_map(
 
     new_columns = []
     for c in ds.get("columns", []):
-        if c.get("table") in name_map:
+        if c.get("table") in targets:
             nc = dict(c)
-            nc["table"] = name_map[c["table"]]
+            nc["table"] = _remap(c["table"])
             new_columns.append(nc)
         else:
             new_columns.append(c)

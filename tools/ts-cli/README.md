@@ -2373,7 +2373,7 @@ ts tableau build-model "workbook.twbx" \
 | `--model-name`, `-m` | no | Model name (default: derived from datasource name) |
 | `--datasource`, `-d` | no | Filter to a single datasource |
 | `--dry-run` | no | Report stats only — don't write files |
-| `--table-name-map` | no | GENERATE mode only (no `--existing-guid`). Path to a JSON file mapping TWB physical table name → ThoughtSpot table TML `name`, for when they differ (warehouse-normalized names, sqlproxy/published-datasource scoping). Ignored (with a stderr note) when `--existing-guid` is set. |
+| `--table-name-map` | no | GENERATE mode only (no `--existing-guid`). Path to a JSON file mapping TWB physical table name → ThoughtSpot table, for when they differ (warehouse-normalized names, sqlproxy/published-datasource scoping). Entries can be keyed by datasource, and a target can set the table `name` and `db_table` separately; see "Table name remapping" below. Ignored (with a stderr note) when `--existing-guid` is set. |
 | `--database`, `-D` | no | GENERATE mode only. Warehouse database for the emitted Table TML(s) `db` field. Empty is fine for offline emission + local `ts tml lint`. (Short flag is `-D`, not `-d` — `-d` is already `--datasource`.) |
 | `--schema`, `-s` | no | GENERATE mode only. Warehouse schema for the emitted Table TML(s) `schema` field. Empty is fine for offline emission + local `ts tml lint`. |
 | `--reconcile-table` | no | GUID of an existing ThoughtSpot table to reconcile emitted columns against (consultant/stand-in-view case). Requires `--profile`. |
@@ -2458,6 +2458,28 @@ TML: `model.tables[].name` and `.fqn`, `model_tables[].name` and join `with`/`on
 endpoints, `columns[].column_id` table prefixes, and any `[TABLE::COL]` refs formula
 translation embeds via column scoping. Tables absent from the map pass through
 unchanged. Implemented by `apply_table_name_map()` in `ts_cli/tableau/build_model.py`.
+
+**Per datasource.** Two published datasources both parse to a table named `sqlproxy`,
+so a flat map sends both to the same table. Key entries by datasource name (as
+`ts tableau parse` reports it) to send each to its own table; flat entries still apply
+to every datasource, and a datasource's own entry overrides them:
+
+```json
+{
+  "orders | Project : Data Sources": {"sqlproxy": "ORDERS"},
+  "returns | Project : Data Sources": {"sqlproxy": "RETURNS"}
+}
+```
+
+A datasource the map does not cover logs `Table name map: 0 of N table(s) mapped`; a
+nested entry under a key that names no datasource is refused, listing the names.
+
+**Display name.** A string target sets both the Table TML `name` and its `db_table`.
+To give the ThoughtSpot table a readable name over the physical table, use an object:
+`{"sqlproxy": {"name": "Orders", "db_table": "ORDERS"}}`. Joins, `column_id`s and
+formula scopes take the `name`; `fqn` and the Table's `db_table` take the `db_table`. A
+target with only `name` keeps the parsed `db_table`. Implemented by
+`resolve_table_name_maps()` / `table_name_map_for()` in the same module.
 
 **SQL View emission and name disambiguation:** each Custom SQL relation
 (`<relation type='text'>`) becomes one `.sql_view.tml`, which the model references by
