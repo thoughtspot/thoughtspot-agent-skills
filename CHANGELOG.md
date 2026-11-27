@@ -5,6 +5,10 @@ Skill-level changes are tracked in each skill's own `## Changelog` section.
 
 ---
 
+## 2026-11-28
+- fix: the Snowflake Semantic View converter keeps a moving window's frame (`N PRECEDING AND M FOLLOWING`; every frame was `-1 , 0`, which ThoughtSpot rejects), reads an `ORDER BY` with no frame as a running total, not a grand total, and skips a fixed `PARTITION BY` on a cumulative or moving window instead of dropping it (YTD became a lifetime total; BL-242)
+- chore: bump ts-cli to v0.228.2
+
 ## 2026-11-27
 - feat: `ts databricks verify` checks that a Model converted from a Databricks Metric View returns the Metric View's numbers. It runs each query shape with `MEASURE()` on the Metric View and with AgentQL on the imported Model, and compares every cell by its Databricks type (counts exactly, DECIMAL at its scale, text exactly, DOUBLE within 1e-9). The default shapes are the total, each dimension, each boolean flag filtered `= true` and `= false`, and a search filter on one dimension value; when no value qualifies and no flag filter compared data, the run reports `incomplete`, not a match. An MV measure or dimension the Model lacks fails the run unless the converter skipped it, as does an imported Model that differs from the TML file. `ts-convert-from-databricks-mv` runs it in a new Step 11c, after checking the data can show a difference (BL-639; skill v1.22.0)
 - chore: bump ts-cli to v0.228.0
