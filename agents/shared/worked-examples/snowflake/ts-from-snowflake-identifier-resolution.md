@@ -151,7 +151,7 @@ The grouping key is `COMPANIES::COMPANY_ID` — the PK on the TO (parent) side o
 | Fact | SV Expression | Translation | Column Type |
 |---|---|---|---|
 | Tenure Months | `DATEDIFF(month, HIRE_DATE, CURRENT_DATE())` | `diff_months ( today ( ) , [EMPLOYEES::HIRE_DATE] )` | ATTRIBUTE (facts are classified ATTRIBUTE unconditionally — BL-181) |
-| Salary Band | `CASE WHEN SALARY >= 90000 THEN 'Senior' WHEN SALARY >= 70000 THEN 'Mid' ELSE 'Junior' END` | `if ( [EMPLOYEES::SALARY] >= 90000 ) then 'Senior' else if ( [EMPLOYEES::SALARY] >= 70000 ) then 'Mid' else 'Junior'` | ATTRIBUTE (string) |
+| Salary Band | `CASE WHEN SALARY >= 90000 THEN 'Senior' WHEN SALARY >= 70000 THEN 'Mid' ELSE 'Junior' END` | `( if ( [EMPLOYEES::SALARY] >= 90000 ) then 'Senior' else if ( [EMPLOYEES::SALARY] >= 70000 ) then 'Mid' else 'Junior' )` | ATTRIBUTE (string) |
 
 **Note:** `DATEDIFF(month, start, end)` → `diff_months(end, start)` — arguments are reversed.
 `CURRENT_DATE()` → `today()`.
@@ -322,7 +322,7 @@ model:
     name: Tenure Months
     properties:
       column_type: ATTRIBUTE
-  - expr: "if ( [EMPLOYEES::SALARY] >= 90000 ) then 'Senior' else if ( [EMPLOYEES::SALARY] >= 70000 ) then 'Mid' else 'Junior'"
+  - expr: "( if ( [EMPLOYEES::SALARY] >= 90000 ) then 'Senior' else if ( [EMPLOYEES::SALARY] >= 70000 ) then 'Mid' else 'Junior' )"
     id: formula_Salary Band
     name: Salary Band
     properties:

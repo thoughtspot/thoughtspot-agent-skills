@@ -778,9 +778,15 @@ ts tml verify-render <liveboard-guid> --profile myprofile --org 1417628299
 | `liveboard` (arg) | required | GUID or name of the imported Liveboard |
 | `--profile`, `-p` | first profile | Profile to use |
 | `--org` | profile/env org | Org id or name the Liveboard lives in |
+| `--strict-data` | off | Also fail when a tile is suspect (see below) |
+
+It also lists **suspect tiles**: a tile that returns no rows, a single row of zeros, or one
+all-NULL group. That is the shape of a query that could not combine two facts — a measure filter
+on one fact with an attribute from another answers 0 with no error. A real zero is possible, so
+this is advisory unless `--strict-data` is passed.
 
 **Output:** JSON `{"ok", "board", "tiles_rendered", "error", "failing_tiles": [{visual, error}],
-"blank_chart_tiles": [{visual, chart_type}]}`.
+"blank_chart_tiles": [{visual, chart_type}], "suspect_tiles": [{visual, reason}]}`.
 **Exit code** is `0` only if the board returns data **and** has no blank chart tiles, `1`
 otherwise — so a conversion skill can gate its import step on it
 (`ts tml import ... && ts tml verify-render <guid>`).
@@ -2947,6 +2953,48 @@ output directory; prints a counts summary JSON to stdout.
 ---
 
 
+## `ts sisense` — Sisense → ThoughtSpot converter
+
+Offline: every subcommand reads a Sisense bundle JSON (`{dashboard, widgets, datamodel}`) from
+disk. `parse` prints the inventory; `build-model` emits Table + Model TML and `mapping.json`;
+`build-liveboard` emits the Liveboard. Skill: `agents/cli/ts-convert-from-sisense`.
+
+### `ts sisense build-liveboard`
+
+Two binding modes. Default: bind to the Model `build-model` generates (`--model-name`, the same
+connection/database/schema options). `--target-model`: bind to an EXISTING Model through its
+exported TML — fields resolve by table instance + column (role copies by name or by the
+relation's foreign-key column), Sisense `count` becomes `unique count`, widget filters become
+search filters, tab sets keep their active tab, titles become `custom_name`, rich text and
+tab-set titles become note tiles, the layout becomes the tile grid, `--drill` dashboards become
+details tables, and dashboard filters become chips with `excluded_visualizations`. Exported with
+`--associated`, the Tables map warehouse column names onto renamed Table columns and give the
+warehouse tables the binding is checked against. What is carried is decided by an allowlist on
+both sides: every dashboard, widget, panel, filter and data-model setting it does not read, and
+the Model's own filters, `join_progressive`, join types and column properties, are NEEDS REVIEW
+in `migration-report.json` on every tile they affect.
+
+```bash
+ts tml export <model-guid> --include-obj-id --associated --profile myprofile > target-model.json
+ts sisense build-liveboard --input bundle.json --target-model target-model.json --out out/ \
+  --drill _drill_case_list.dash --overrides overrides.json
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input`, `-i` | required | Sisense bundle JSON |
+| `--out`, `-o` | required | Output dir: `<name>.liveboard.tml` (+ `.answer.tml` per widget in default mode, `migration-report.json` in `--target-model` mode) |
+| `--model-name` | — | Model the answers bind to; required without `--target-model` |
+| `--target-model` | — | Model TML file — raw YAML/JSON, or the JSON `ts tml export` prints. Its root `obj_id` (`--include-obj-id`) is used for the viz binding |
+| `--drill` | — | A jump-to-dashboard target's `.dash` or bundle JSON; repeatable |
+| `--model-fqn` | — | Model GUID. In `--target-model` mode it is used when given, else the TML's `guid` |
+| `--report-name` | dashboard title | Liveboard name |
+| `--overrides` | — | JSON: `report_name`, and in `--target-model` mode `field_map` (`{"[Table.col]": "Model Column"}`, or `{"[Table.col]": {"<agg>": "Model Column", "": "Model Column"}}` keyed by Sisense aggregation, `""` for the plain column) `filter_map` (`{"[Table.col]": "<search fragment>"}` when every filter on that dim has one condition, else `{"[Table.col]": [{"when": <Sisense filter>, "search": "<fragment>"}]}`; `[column] op value` terms only, on a column that is neither a measure nor a date) and `connections` (`{"<Sisense connection>": "<ThoughtSpot connection>"}`). Overrides go through the same checks as a native binding |
+
+**Output:** JSON summary on stdout (`answers`, `visuals_migrated`, `approximated`,
+`merged_tabs`, `needs_review`, `filter_chips`, `liveboard`); each NEEDS REVIEW row is echoed to
+stderr with its reason.
+
 ## Piping and scripting
 
 All commands write JSON to stdout, making them easy to pipe into `jq` or Python:
@@ -4969,6 +5017,32 @@ the list of used Models not found in this Org, unknown. A snapshot written befor
 0.223.0 holds no usage, so replaying H from it is refused: capture it again. One written
 by 0.223.0 holds usage without Orgs: it replays, and every not-found ID reads "Org not
 recorded". Logic in `ts_cli/audit/usage.py`.
+
+**The Usage view (since 0.225.0).** With usage read, each audited Model's
+`corpus.models[].usage` also carries its `status` (`active`, `idle`, `never`, `too_new`
+or `not_judged`, from H17's own reading, so the view and H17 agree), its `dependents`
+(`total`, `liveboards`, `answers`, `sets` and `other`, from the dependents lookup the
+audit already runs, which returns the dependents the audit's user can see in its Org;
+`visible`, their sum, and `complete`. `total` is null, and `visible` a lower bound, when
+the Model's dependents were not read in full: its Sets not fetched, not known to be
+fetched, or its Set lookup failed (the context's `sets_incomplete`; an older snapshot's
+warnings name them), or its own dependents reading incomplete — dependents hidden from
+the user and not returned (`hasInaccessibleDependents` without
+`areInaccessibleDependentsReturned`), a body that is not a list, or the Model missing
+from its batch's answer or without a dependents map (the context's
+`dependents_incomplete`, with a warning naming the Model). `complete` is null for a
+snapshot from before 0.225.0, which did not record that check), its `owner` (the metadata
+header's author display name, else author name) and its `created` date; `corpus.usage`
+gains `status_idle_days`, the idle days the statuses used (H17's, else the catalog's),
+and `dependents_checked`, false when the run did not record which dependents were read
+in full (a snapshot from before 0.225.0).
+No new call. The report's Usage view (`#usage`, a sidebar link only when the run
+fetched usage; "Not read" when it could not read it) draws one dot per Model by days
+since its last query and its dependents, lists the Models in a sortable table with
+status and "No dependents" filters, and exports the selected rows as CSV or as the
+`ts-audit-candidates/1` JSON (ts-audit SKILL.md, "Candidates file"), built in the
+browser, each stating that its dependents are those visible to the audit's user in this
+Org (`dependents_scope`). Logic in `ts_cli/audit/usage_triage.py`.
 
 **Malformed TML is not judged.** A Model whose TML, or a Table it uses, holds the wrong
 shape where the audit reads one gets no findings and no readiness score, and neither do

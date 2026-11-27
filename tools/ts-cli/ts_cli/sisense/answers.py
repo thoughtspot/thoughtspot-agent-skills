@@ -61,6 +61,21 @@ _DATE_BUCKET_MAP: dict[str, str] = {
 }
 
 
+def _mapped_chart(base: str, wt: str, wtype, st: str, subtype) -> tuple:
+    if "100" in st:      # a 100% stack shows each value's SHARE of its total
+        return ("STACKED_" + base if base in ("BAR", "COLUMN") else base), "NEEDS REVIEW", \
+            f"{subtype} is a 100% stack (shares of each total); it is carried as absolute values"
+    if base in ("BAR", "COLUMN") and "stacked" in st:
+        return "STACKED_" + base, "Migrated", "stacked subtype"
+    if base == "SCATTER" and ("bubble" in st or wt == "chart/bubble"):
+        return "SCATTER", "Approximated", "bubble approximated as scatter (size dropped)"
+    if wt == "chart/boxplot":    # quartiles / median / whiskers: not the values a table shows
+        return base, "NEEDS REVIEW", f"{wtype} shows quartiles and a median; carried as a plain {base}"
+    if base in ("TREEMAP",) or wt == "sunburst":
+        return base, "Approximated", f"{wtype} approximated as {base}"
+    return base, "Migrated", ""
+
+
 def chart_type_for(wtype, subtype: str = "") -> tuple:
     """Sisense widget type -> (ts_chart, status, note). None ts_chart => skip (text widget).
 
@@ -73,16 +88,10 @@ def chart_type_for(wtype, subtype: str = "") -> tuple:
         base = _CHART_MAP[wt]
         if base is None:
             return None, "Skipped", f"{wtype} is a text/no-chart widget"
-        if base in ("BAR", "COLUMN") and "stacked" in st:
-            return "STACKED_" + base, "Migrated", "stacked subtype"
-        if base == "SCATTER" and ("bubble" in st or wt == "chart/bubble"):
-            return "SCATTER", "Approximated", "bubble approximated as scatter (size dropped)"
-        if base in ("TREEMAP",) or wt in ("chart/boxplot", "sunburst"):
-            return base, "Approximated", f"{wtype} approximated as {base}"
-        return base, "Migrated", ""
+        return _mapped_chart(base, wt, wtype, st, subtype)
     if wt in ("", "unknown"):
         return _DEFAULT_CHART, "NEEDS REVIEW", "widget type unknown; defaulted to GRID_TABLE"
-    return _DEFAULT_CHART, "Approximated", f"no direct mapping for '{wtype}'; defaulted to GRID_TABLE"
+    return _DEFAULT_CHART, "NEEDS REVIEW", f"no mapping for widget type '{wtype}' (what it computes is unknown); defaulted to GRID_TABLE"
 
 
 def _model_col(dim) -> str:
@@ -152,16 +161,24 @@ def _resolve_fields(widget: dict, norm: dict) -> tuple:
 
 
 def _widget_top_n(widget: dict) -> int | None:
-    """A per-attribute top/bottom rank on the widget -> the integer N (build_from_spec appends
-    `top N`); None when absent or unparseable."""
+    """A per-attribute TOP rank on the widget -> the integer N (build_from_spec appends
+    `top N`); None when absent, unparseable or a bottom rank (``_rank_note`` reports those)."""
     for sf in widget.get("filters", []) or []:
-        if sf.get("kind") == "top_n":
+        if sf.get("kind") == "top_n" and sf.get("operator") == "top":
             vals = sf.get("values") or []
             try:
                 return int(vals[0])
             except (TypeError, ValueError, IndexError):
                 return None
     return None
+
+
+def _rank_note(widget: dict) -> str:
+    """A top/bottom rank the default path does not carry -> the reason, else ''."""
+    for sf in widget.get("filters", []) or []:
+        if sf.get("kind") == "top_n" and (sf.get("operator") != "top" or not _widget_top_n(widget)):
+            return f"{sf.get('operator')} {sf.get('values')} ranking is not carried"
+    return ""
 
 
 # Chart types valid with no measure; anything else with zero measures -> NEEDS REVIEW.
@@ -198,6 +215,9 @@ def _widget_answer(widget, idx, tab, model_name, model_fqn, norm, measures, buil
         note = _note_join(note, f"{ct} needs a measure but none mapped")
     if missing:
         note = _note_join(note, "unmapped field(s): " + ", ".join(missing))
+    if _rank_note(widget):                            # flag, never turn a bottom N into a top N
+        status = "NEEDS REVIEW"
+        note = _note_join(note, _rank_note(widget))
     a_obj = build_answer(title, f"{tab}-{idx}", model_name, model_fqn, cols, ct,
                          measures, roles, bucket_tokens, _widget_top_n(widget))
     return a_obj, {"answer": a_obj["answer"], "tile": None}, \
@@ -291,10 +311,12 @@ def _chip_from_filter(sf: dict, col: str) -> dict:
             "is_single_value": False, "display_name": ""}
     kind = sf.get("kind")
     values = sf.get("values") or []
+    # member/exclude use the exported-Liveboard shape (top-level `oper` + `values`), live-verified
+    # to filter every tile; ranges keep generic_filter until verified (open-items #5)
     if kind == "member" and values:
-        chip["generic_filter"] = {"oper": "IN", "values": [str(v) for v in values]}
+        chip.update(oper="in", values=[str(v) for v in values])
     elif kind == "exclude" and values:
-        chip["generic_filter"] = {"oper": "NOT_IN", "values": [str(v) for v in values]}
+        chip.update(oper="not in", values=[str(v) for v in values])
     elif kind == "range":
         gf = _range_generic_filter(sf.get("raw"))
         if gf:

@@ -51,6 +51,9 @@ const lib = path.join(chartSkill(), "library");
 const { chartDirOf, MAYA } = await import(pathToFileURL(path.join(chartSkill(), "helpers", "env.mjs")).href);
 const { checkBackup } = await import(pathToFileURL(path.join(chartSkill(), "helpers", "backup-check.mjs")).href);
 const { cdnProblems, mayaPinProblems } = await import(pathToFileURL(path.join(chartSkill(), "helpers", "pin-check.mjs")).href);
+// Blocking writes: on macOS Node writes to a pipe asynchronously, so the process.exit calls below would drop all
+// but the first 8,192 bytes of a piped block. Linux already writes pipes synchronously.
+for (const s of [process.stdout, process.stderr]) if (s._handle && s._handle.setBlocking) s._handle.setBlocking(true);
 const argv = process.argv.slice(2);
 const VALUED = new Set(["--max", "--liveboard", "--reuse", "--backup"]);
 const flags = new Set(argv.filter((a, i) => a.startsWith("--") && !VALUED.has(argv[i - 1])));

@@ -367,4 +367,5 @@ Update the example's README when the story changes.
 
 | Version | Date | Change |
 |---|---|---|
+| 1.0.1 | 2026-11-25 | `liveboard-pack.mjs` sets stdout and stderr to blocking writes, so a `--check` or `--list` run piped on macOS prints its whole output instead of the first 8,192 bytes. |
 | 1.0.0 | 2026-11-05 | Initial release. Builds a storytelling Liveboard of custom chart tiles across numbered tabs on a real model through the ThoughtSpot MCP: intake, tab plan, tiles built by ts-object-answer-chart-builder, narrative tiles, filters, checksummed patch blocks with a round-trip proof, and a screenshot of every tab. |

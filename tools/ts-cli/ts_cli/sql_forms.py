@@ -106,13 +106,21 @@ def strip_sql_comments(expr: str, *, line_markers: tuple = ("--",), ident_quote:
 # --- grouping ----------------------------------------------------------------------------
 
 def _sqlf_close(text: str, i: int) -> int:
-    """Index of the ``)`` closing the ``(`` at ``text[i]``, skipping quoted text; -1 if none."""
-    depth, quote = 0, None
+    """Index of the ``)`` closing the ``(`` at ``text[i]``, skipping quoted text and ``[…]``
+    references; -1 if none. A quote inside a reference (``[T::cust's x]``) is part of the
+    name, not a string delimiter: read as one, two such names paired their apostrophes and
+    a group appeared to close at the end of the text (BL-632 review)."""
+    depth, quote, bracket = 0, None, False
     while i < len(text):
         ch = text[i]
-        if quote:
+        if bracket:
+            if ch == "]":
+                bracket = False
+        elif quote:
             if ch == quote:
                 quote = None
+        elif ch == "[":
+            bracket = True
         elif ch in "'\"":
             quote = ch
         elif ch == "(":
@@ -197,11 +205,67 @@ def sqlf_null_default_call(name: str, raw_args: list[list[str]], finish, marker:
     return _sqlf_coalesce_chain(texts)
 
 
+def sqlf_if_chain(branches: list[tuple[str, str]], else_: str) -> str:
+    """``( if ( c1 ) then v1 else if ( c2 ) then v2 … else e )``, parenthesised as a whole.
+
+    ThoughtSpot's ``else`` is greedy: a bare ``if ( c ) then a else b = x`` compiles to
+    ``CASE WHEN c THEN a ELSE (b = x) END`` (live-verified 2026-11-26, BL-632), so a
+    conditional that is an operand of anything must be grouped. Every translator emits its
+    conditionals through here so the caller can splice the result anywhere."""
+    out = else_
+    for cond, val in reversed(branches):
+        out = f"if ( {cond} ) then {val} else {out}"
+    return f"( {out} )"
+
+
+def sqlf_unwrap_conditional(expr: str) -> str:
+    """``expr`` without the grouping ``sqlf_if_chain`` adds, when it is one parenthesised
+    conditional standing on its own: the whole formula, or a whole argument of a call. Only
+    for positions where nothing can follow it inside the same group (BL-632)."""
+    e = expr.strip()
+    if e.startswith("( if (") and _sqlf_close(e, 0) == len(e) - 1:
+        return e[1:-1].strip()
+    return expr
+
+
+_WINDOW_VALUE = re.compile(r"\b(first_value|last_value) \(")
+
+
+def sqlf_aggregate_window_values(expr: str) -> str:
+    """Wrap each ``first_value ( … )`` / ``last_value ( … )`` call that is not the whole
+    formula in ``sum ( … )``.
+
+    ThoughtSpot rejects arithmetic over them at import ("Aggregation function must be
+    applied directly over a rank-related function", live 2026-11-26, BL-637); with each
+    wrapped, ``( sum ( first_value ( … ) ) + sum ( last_value ( … ) ) ) / 2`` imports and
+    matched Databricks at every grain. ``sum`` is an identity there: the call is already
+    one value per query group. A call already wrapped in ``sum ( … )`` is left alone."""
+    e = expr.strip()
+    whole = e
+    while whole.startswith("( ") and _sqlf_close(whole, 0) == len(whole) - 1:
+        whole = whole[1:-1].strip()
+    m = _WINDOW_VALUE.match(whole)
+    if m and _sqlf_close(whole, m.end() - 1) == len(whole) - 1:
+        return expr
+    out, i = [], 0
+    for m in _WINDOW_VALUE.finditer(expr):
+        if m.start() < i:
+            continue  # inside a call already handled
+        end = _sqlf_close(expr, m.end() - 1)
+        if end == -1:
+            return expr
+        if re.search(r"\bsum \(\s*$", expr[:m.start()]):
+            out.append(expr[i:end + 1])
+        else:
+            out.append(f"{expr[i:m.start()]}sum ( {expr[m.start():end + 1]} )")
+        i = end + 1
+    return "".join(out) + expr[i:]
+
+
 def _sqlf_coalesce_chain(texts: list[str]) -> str:
     if len(texts) == 1:
         return texts[0]
-    inner = _sqlf_coalesce_chain(texts[1:])
-    return f"if ( {texts[0]} != null ) then {texts[0]} else {inner}"
+    return sqlf_if_chain([(f"{t} != null", t) for t in texts[:-1]], texts[-1])
 
 
 def sqlf_div0(x: str, y: str) -> str:

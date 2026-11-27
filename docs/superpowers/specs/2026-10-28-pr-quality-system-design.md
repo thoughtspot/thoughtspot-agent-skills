@@ -106,6 +106,17 @@ and spot checks, not on finding validator failures or building the first repro.
 
 ### C1. `scripts/pr-ready.sh`: one command, superset of CI
 
+> **Amended 2026-11-26: the default run is fast checks only.** The smoke suites and
+> pytest run only with `--full`; a default run lists each as NOT RUN, and the evidence
+> header says the run was fast. Evidence for the change: on 2026-11-26 a 56-line
+> docs-only branch ran the full suite six times locally (four pr-ready runs, two
+> pre-commit runs on a merge commit), about ten minutes each. The runs found no defect
+> in the branch (their two failures were the local `PATH`); both reviews found real
+> defects. CI runs the same suites as the required `validate` check, which `--admin`
+> cannot bypass, so the local copy only moved where a failure shows up. Pre-commit
+> also stops running the unit suites on a merge commit of `main` (found by the
+> canonical repo's URL) whose staged `.py` files are all main's. The superset property below still holds for `--full`.
+
 - **Structured list.** A single structured list of checks (`tools/validate/checks.toml`
   or a Python module) records, per check:
   - its arguments per context (pre-commit staged / pr-ready / CI full / CI PR-only)

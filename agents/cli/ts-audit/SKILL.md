@@ -312,7 +312,7 @@ them:
 | Sets and each Set's consumers | When a selected rule declares `sets` (H4, H5) |
 | The custom calendars registered on the cluster's connections (`calendars/search`, paged) | When a selected rule declares `calendars` (P22; P19 also uses them, for a code-based calendar name that a custom calendar also has); the report's Data Cache view reads them too |
 | Each connection's settings, reduced to its id, name, type and whether it uses OAuth, PrivateLink or a template variable (`connection/search` with details, paged; no configuration value is kept), and whether its metadata header says it is parameterized (a paged `metadata/search` of CONNECTION headers) | When a selected rule declares `connections` (P24; P23 also uses them, for each connection's type); the report's Data Cache view reads them too |
-| Each Model's usage, from ThoughtSpot's system Model TS: AI and BI Stats (`searchdata`): its last query time over all the history kept, and its queries and distinct users over the last 180 days; the Org it was read in (`auth/session/user`); and which used Model IDs match no object the user can see now (a paged `metadata/search`). GUIDs and counts only | When a selected rule declares `usage` (H17); the report's scorecards, Dashboard and Cleanup view read it too |
+| Each Model's usage, from ThoughtSpot's system Model TS: AI and BI Stats (`searchdata`): its last query time over all the history kept, and its queries and distinct users over the last 180 days; the Org it was read in (`auth/session/user`); and which used Model IDs match no object the user can see now (a paged `metadata/search`). GUIDs and counts only | When a selected rule declares `usage` (H17); the report's scorecards, Dashboard, Cleanup and Usage views read it too |
 
 So narrowing `--angles` also narrows the fetch. On the AI-instructions lookup, a final 401
 (after re-authentication), a 429, or any `requests` exception raised by the request or
@@ -413,6 +413,8 @@ when. Its limits:
   read (a build that refuses `[Org ID]`/`[Org]`), the run warns and keeps one list,
   marked "Org not read".
 
+The report's **Usage** view (Step 5) lists every audited Model with its status, dependents, owner and creation date, and exports a selection as the candidates file below; it adds no API call. Its dependents are those ThoughtSpot's dependents lookup returns to the audit's user in the Org the audit ran in. A Model whose dependents were not read in full (its Sets not fetched or its Set lookup failed, or dependents hidden from the audit's user, an answer that was not a list, or the Model missing from its batch's answer; the run warns for the last three) shows its visible count as a lower bound ("5+"): never counted as none. Active, it stays Active; idle with a dependent visible, it is "check first"; idle with none visible, it is undecidable and sits in the grey Not judged band, never among the retire candidates.
+
 H17 (LOW) reports a Model with no query in 90 days or more (the catalog parameter
 `idle_days`), or none in the history when that history starts at least 90 days before
 the read (a shorter history judges no Model it does not hold, and a never-queried Model
@@ -423,6 +425,74 @@ failing, or a history with no first query), the run warns, naming the status and
 usage says **Not read**: a failed read never reads as unused. A final 401, a 429 or a
 `requests` exception aborts the run once, as for the other fetches. The live probe behind
 this is [references/open-items.md](references/open-items.md) #9.
+
+### Candidates file
+
+The Usage view exports the Models a reviewer selects as `ts-audit-candidates.json`, the
+input a later ts-dependency-manager and `ts share` list mode is to read (BL-646). Its
+shape is fixed within a `format` version: a later release may add fields (a reader
+ignores one it does not know), but renaming or removing one, or changing its meaning,
+needs a new version.
+
+```json
+{
+  "format": "ts-audit-candidates/1",
+  "generated": "2026-11-26T09:15:00Z",
+  "cluster": "https://{your-instance}.thoughtspot.cloud",
+  "dependents_scope": "visible to the audit's user in this Org",
+  "usage": {"scope": "usage of all Orgs, read from the Primary Org",
+            "org": {"id": 0, "name": "Primary"}, "read_at": "2026-11-26T03:40:09Z",
+            "idle_days": 90, "window_days": 180},
+  "objects": [
+    {"guid": "…", "name": "Sales (old)", "type": "MODEL", "status": "idle",
+     "last_used": "2026-05-02", "days_since_last_use": 208, "queries_180d": 0,
+     "users_180d": 0, "dependents_total": 0, "dependents_visible": 0,
+     "dependents_complete": true, "liveboards": 0, "answers": 0, "sets": 0, "other": 0,
+     "owner": "Ann Example", "created": "2024-03-11"}
+  ]
+}
+```
+
+The top level:
+
+- `format` names the shape; `generated` is when the file was exported (UTC, to the
+  second); `cluster` is the audited cluster's URL ("" when the run did not record one).
+- `dependents_scope` says what the dependent counts cover: the dependents the audit's
+  user can see in the Org the audit ran in, as ThoughtSpot's dependents lookup returns
+  them to that user. The file makes no claim about any other dependents.
+- `usage.scope` is the report's "whose usage" wording; `usage.org` is the Org the usage
+  was read from (`id` and `name`, either null when not read); `usage.read_at` is when it
+  was read; `usage.idle_days` is the idle days the statuses used (H17's); and
+  `usage.window_days` is the span `queries_180d` and `users_180d` cover.
+
+Each object:
+
+- `status` is `active`, `idle`, `never`, `too_new` or `not_judged` (the Usage view's
+  statuses); `type` is `MODEL`.
+- `last_used` and `days_since_last_use` are null for a Model the history holds no query
+  of; `owner` and `created` are null when the metadata header does not record them.
+- `liveboards`, `answers`, `sets` and `other` (anything else that depends on the Model,
+  such as a View or Spotter feedback) split its dependents, and `dependents_visible` is
+  their sum (`sets` left out when null).
+- `dependents_complete` is true when the dependents were read in full, and then
+  `dependents_total` equals `liveboards + answers + sets + other`. It is false when they
+  were not: the Model's Sets were not read (the run did not fetch them, or its Set lookup
+  failed; `sets` is then null), or its own dependents reading was incomplete (dependents
+  hidden from the audit's user and not returned, an answer that was not a list, or the
+  Model missing from its batch's answer; the run warns, naming the Model). Then
+  `dependents_total` is null and `dependents_visible` is a lower bound: such a Model is
+  never counted as having no dependents. It is null when the run could not say (a
+  snapshot written before ts-cli 0.225.0, which did not record the check; the total is
+  then counted as read).
+- Every count is what the audit saw when it read the usage, not now: re-read dependents
+  before acting on the file.
+
+The CSV export has the same per-object columns plus `usage_scope`, `dependents_scope`,
+`cluster_url` and `audit_read_date` on every row; a null is an empty cell, and a boolean
+reads `true` or `false`. Read its columns by header name, not position: from 3.28.0 on, a
+new column is added at the end of the row. A cell
+starting `=`, `+`, `-` or `@` is prefixed with a single quote, so a spreadsheet does not
+run it as a formula.
 
 ---
 
@@ -446,7 +516,7 @@ ts audit run \
   | ts audit report -o ~/Dev/audit-runs/{profile_name}-{date}-{HHMM}/report.html
 ```
 
-The report is a single self-contained HTML file with seven views. Its size grows with the
+The report is a single self-contained HTML file with eight views. Its size grows with the
 estate: about 4MB for a 148-Model sample, measured before 3.19.0 added each formula's definition to the Formulas view, which added 7.5% on a synthetic estate of 20 Models with 40 short formulas each (25 to 70 characters); long expressions, a many-armed CASE say, cost more. Since 3.22.0 a report in which some Model has a formula built on another (since 3.25.0, any formula) also carries the graph's libraries, about 500KB (Cytoscape.js, dagre and cytoscape-dagre, `ts_cli/audit/vendor/`); a report with none does not.
 
 | View | What it shows |
@@ -456,6 +526,7 @@ estate: about 4MB for a 148-Model sample, measured before 3.19.0 added each form
 | **Cross-Model** | Sortable/filterable table of all findings across models |
 | **Object Map** | Table reuse (Sankey), model overlaps, dependencies (bar charts) |
 | **Cleanup** | Orphan models, stale objects, and Models not queried in 90 days or more, or never (H17; its section reads "Not read" when the usage could not be read, and says it was not collected when no selected rule fetched it, never "No findings"), with checkbox selection + clipboard copy. When the run fetched usage, the used Model IDs that match no Model, Table or View the user can see now, with their queries and users over 180 days and last query date, by ID only, since the system Model keeps no names, split by the Org each was queried in: "Used in this Org, but not found" (deleted, or not shared with the audit's user), "Used in other Orgs" (one collapsed group per Org, opened to its IDs; no claim they are deleted) and "Org not recorded". One list marked "Org not read" when the Orgs could not be read; "Not read" when the usage, or the objects the user can see, could not be read |
+| **Usage** | Shown, with a sidebar link, only when the run fetched usage; it reads **Not read** when the usage could not be read, never an empty table. One row per audited Model with its status: **Active** (queried within H17's idle days, 90), **Idle** (no query in 90 days or more), **Never queried** (none in a history that covers 90 days), **Too new** (never queried, created less than 90 days before the read: H17 skips it) or **Not judged** (a history too short to say, or no query time recorded); the statuses come from H17's own reading, so the view and H17 agree. A quadrant plots each Model by days since its last query (log scale; never-queried, and too-new or not-judged Models, in bands of their own at the right) against its dependents, with a line at 90 days and the quadrants named "Idle, no dependents — retire candidates", "Idle, has dependents — check first" and "Active"; hovering a dot names the Model, its last use, queries and dependents, and clicking it selects its row. The table below is the source of truth: checkbox, Model (linking to its scorecard), Status, Last used, Queries and Users over the window, Dependents (those the audit's user can see in this Org; Liveboards, Answers, Sets and other on hover; a Set counts, since removing the Model removes it; a lower bound such as "5+ (Sets not read)" when they were not read in full, drawn as a hollow dot at its visible count; such a Model is out of the "No dependents" filter, and an idle one with none visible sits in the grey Not judged band), Owner (the metadata header's author), Created and the worst finding's severity, each column sortable; by default retire candidates come first, the most idle first. The shared filter bar's status chips and a "No dependents" chip narrow the table and the chart together. Select all shown, Clear, and **Export CSV** / **Export JSON** write the selected Models, in the browser, as the candidates file (see "Candidates file") |
 | **Formulas** | Each Model's formula dependency tree: every tree starts at a formula nothing else uses (or where a circular chain is entered) and opens down to the table columns and parameters, marking each formula MEASURE or ATTRIBUTE, a hidden helper (hidden, and used by other formulas), used once and hidden (a formula H16 reported: a candidate to paste into the one formula that uses it; a report built without H16 tags none) or hidden and unused (a cleanup candidate), and how many formulas use it. An open formula shows its definition beneath it. Clicking a formula, column or parameter opens a panel beside the tree (on a narrow screen, a sheet at the foot of the page) with its definition (every reference a link, a formula named as the tree names it, by its column's name; when that differs from the TML, the definition as the TML writes it follows, to copy) and, when it uses a formula H16 reported, the definition again with each such helper pasted in, in parentheses, all the way down; what it uses, what uses it and everything that depends on it; following a link opens the tree down to that formula. A search box finds columns and parameters by name, then formulas by name, then formulas by definition, showing the first 50 and counting the rest. The tree is one tab stop: the arrow keys move through it, and Escape closes the definition. Roots open one level; Expand all opens about 2,000 more rows per press. A Graph button, on every Model with formulas (since 3.25.0; before, only on one with a formula built on another), draws the same lineage left to right (columns and parameters, then the formulas built on them); clicking a node opens the same panel and lights everything upstream and downstream of it, a link in the panel moves the graph, and the selection carries between the tree and the graph (and is kept when you come back to the Formulas view). A Model of more than 300 formulas, columns and parameters is drawn one lineage at a time. The tree stays the keyboard-reachable form. The filter bar shared with the Data Cache view and the ERD (Show, All, a toggle chip per kind with its count, the search box, the shown count) has type chips (Columns, Parameters, Measure formulas, Attribute formulas; a formula no column surfaces has no stated kind and counts as an attribute) that filter both modes for the session: the graph hides a switched-off type's nodes and edges and lays the rest out again, each connected part on its own, a rank too tall for the canvas (many measures over one amount column) wrapped into several columns, and the parts (lone nodes last) packed in rows about the canvas's shape, and the 300-node cap counts only what is shown; the graph always opens with every drawn node in view, at whatever zoom that takes (the layout keeps common shapes legible: 40 or 80 formulas on one column, or 150 on five, open at 0.35 or more at 1280×720; a very long chain opens smaller); past the cap it opens on the lineage of a root of a type switched on; the tree hides those rows, keeping a switched-off formula, faded, only as the way to a formula of a shown type under it (a shown column or parameter does not keep it, so switching Measure formulas off hides the measures); search leaves them out and counts them. The shown count counts what the mode shows: the graph, the nodes drawn (past the cap, only the lineage drawn); the tree reaches a column or parameter only through a formula, so with both formula types off it is empty, counts 0 and says why. A link to something switched off still opens its definition, with a note and a button to show its type; a column whose formulas are all switched off gets a note naming them and a button to show them. A legend gives each type one mark, a shape in its colour, used in the tree's rows and the graph's nodes. Reached from the sidebar (a Model picker) or a Model's Formulas tab |
 | **Data Cache** | Which audited Models ThoughtSpot's Data Cache can serve, one row per Model. Its readiness is Can use, Can't use, To confirm, Warning or Not assessed. To confirm means its only reasons are readings the product team is to review, and every check read the whole Model. Not assessed means a check that decides it did not run or could not read part of the Model: what the audit could not read never reads Can use. The reasons that block are a custom calendar (P19), a SQL pass-through formula (P20), a semantic query Model (P21), a source other than Snowflake or Databricks (P23), a connection using OAuth, PrivateLink or a template variable (P24), a parameterized Table (P25), a parameter in a formula (P26), a SQL View (P27) and an RLS rule beyond its Table's own columns (P28). A connection that defines custom calendars (P22) is a warning. The row also lists the checks it could not make and the calendars its columns use, code-based or custom, with the custom calendars registered on its connections. A source whose TML was not read is named there (Not read), since its Table columns may set a calendar the audit did not see. The shared filter bar narrows the list: a toggle chip per readiness (Can use, Can't use, To confirm, Warning, Not assessed) with its count, multi-select, all on at first, switching one off hiding its Models and All switching every chip back on, and a search box over names, reasons and calendars. Each Model links to its scorecard. `#datacache/<guid>` shows one Model's row under its tabs, without the filters, with a link back to every Model. The readiness is read off the same fields those rules judge by, so the view and the findings agree. A report from JSON written before 3.23.0 shows every Model as Not assessed |
 
@@ -499,6 +570,7 @@ If **done**: end the skill.
 
 | Version | Date | Summary |
 |---|---|---|
+| 3.28.0 | 2026-11-26 | **A Usage view.** A new report view, `#usage` (a sidebar link beside Cleanup, only when the run fetched usage; "Not read" when it could not read it, never an empty table): a quadrant of every audited Model by days since its last query and its dependents, with a line at H17's 90 idle days and the quadrants named, a sortable triage table (status, last used, queries, users, dependents by type, owner, created, worst finding) with status and "No dependents" filters, and an export of the selected Models as CSV or as the `ts-audit-candidates/1` JSON file ("Candidates file"), built in the browser; the dependent counts are those the audit's user can see in this Org, and a Model whose dependents were not read in full (Sets not read, or its own reading incomplete: dependents hidden, an answer that was not a list, or the Model missing from it) has a null total, its visible count as a lower bound (`dependents_visible`, `dependents_complete`), never 0. The run records such Models (`sets_incomplete`, `dependents_incomplete`); a snapshot from before reads failed Set lookups from its warnings and cannot say which dependents were hidden. H4 is unchanged. Each Model's status is Active, Idle, Never queried, Too new (never queried, created less than 90 days before the read, the 3.27.1 rule) or Not judged, read through H17's own logic. The audit JSON's `corpus.models[].usage` gains `status`, `dependents` (`total`, `visible`, `complete`, `not_read`, `liveboards`, `answers`, `sets`, `other`), `owner` (the metadata header's author display name, else author name) and `created`, and `corpus.usage` gains `status_idle_days` and `dependents_checked`, all from data the audit already fetches. Absorbs BL-625 (Dashboard usage sort and filters). On the SE demo cluster's 150-Model sample: 117 Active, 12 Idle, 13 Never queried, 8 Too new; 14 retire candidates and 11 idle with dependents. |
 | 3.27.1 | 2026-11-26 | **H17 skips young never-queried Models.** A Model never queried and created less than `idle_days` (90) days before the usage was read, by its metadata header's creation time, is no longer reported as "not queried in 90 days or more"; one with no creation time recorded is judged as before. On the SE demo cluster's 150-Model sample this removed 8 of 33 H17 findings, Models 8 to 49 days old. |
 | 3.27.0 | 2026-11-25 | **Usage by Org.** The usage read gains the Org each used Model was queried in (`[Org ID]` and `[Org]`, from a query of their own: a build that refuses them, or answers without them, leaves the rest of the usage readable, with a warning, and the Cleanup list reads "Org not read"). Read from the Primary Org, the usage holds every Org's (live, 2026-11-25), so when it names more than one Org the Dashboard header says "Usage of all Orgs (N in the usage history), read from the Primary Org on DATE"; read from another Org and naming more than one, it gives the count the data shows and drops the "that Org's only" note. The Cleanup view's "Used, but not found in this Org" list is split into this Org's IDs (deleted, or not shared with the audit's user), "Used in other Orgs" (one collapsed group per Org with its IDs, queries, users and last query there; no claim they are deleted) and "Org not recorded". A Model ID queried in several Orgs (7 of 3,015 on the SE demo cluster) is listed under each, its counts the Model's across all of them, never summed per Org. The audit JSON's `corpus.usage` gains `org_read`, `orgs` and each not-found ID's `orgs`. A snapshot or JSON from 3.26.0 has no Orgs: it replays and renders, every not-found ID under "Org not recorded". H17's message, the Last used tooltips and the scorecard titles use the same "whose usage" wording as the header; H17's description and remediation say what the usage counts by where it was read. Open-items #9 records the probe. |
 | 3.26.0 | 2026-11-25 | **Usage per Model, and H17.** A new conditional data kind, `usage`, fetched only when a selected rule declares it: from the system Model TS: AI and BI Stats, found by its exact name, `searchdata` reads each Model's last query time over all the history kept and its queries and distinct users over the last 180 days (the filter `[TS Query Start Time].'last 180 days'`), every value by its column name, since `searchdata` answers columns in an order of its own. The audit keeps GUIDs and counts, the Org it was read in (`auth/session/user`) and when; a row with no Model ID is dropped and counted. H17 (Human Readiness, LOW, evidence fact; product owner, 2026-11-25): a Model with no query in 90 days or more (the catalog parameter `idle_days`), or none in a history that starts at least 90 days before the read, naming the days since its last query, or where the history starts, and the Org whose usage was read. When the usage cannot be read (the system Model missing or refused, a call failing, or a history with no first query), the run warns with the status and path only, H17 judges no Model, and the report says "Not read" wherever usage would show, H17's Cleanup section and its Cross-Model group included, never "unused" or "No findings"; a final 401, a 429 or a `requests` exception aborts the run once. The report: each scorecard's header shows Last used and the 180-day queries and users; the Dashboard header names the Org and the date the usage was read, with a note when the run was outside the Primary Org, and the heatmap gains a Last used column; the Cleanup view lists H17's Models and a "Used, but not found in this Org" list of the used Model IDs that match no object the user can see now (a paged `metadata/search`), by ID, queries and last query date, since the system Model keeps no names. Limits: the counts cover 180 days; the history lags about a day, so a Model created or first queried since then reads as never queried; the usage is that Org's only. A snapshot written before this release holds no usage, so replaying H from it is refused: capture it again. Live-probed read-only on the SE demo cluster, 2026-11-25; the REST spec was not consulted (open-items #9). |

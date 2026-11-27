@@ -88,6 +88,7 @@ EXPECTED_CI_SMOKES = (
     "smoke_ts_convert_to_dbt",
     "smoke_ts_object_answer_chart_builder",
     "smoke_ts_object_liveboard_chart_builder",
+    "smoke_ts_convert_from_sisense",
 )
 EXPECTED_CI_ONLY_CHECKS = {
     "mapping-currency": ("check_mapping_currency.py", ("--root", ".", "--check"), True),
@@ -193,8 +194,20 @@ def _precommit_unmanaged_scripts() -> list[str]:
     return found
 
 
+#: pytest options in the workflow's lines that take a separate value (`-n auto`).
+_PYTEST_OPTS_WITH_VALUE = {"-n", "--dist", "--maxprocesses"}
+
+
 def _pytest_dirs(args: list[str]) -> set[str]:
-    return {a.rstrip("/") for a in args if not a.startswith("-")}
+    dirs, skip = set(), False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in _PYTEST_OPTS_WITH_VALUE:
+            skip = True
+        elif not a.startswith("-"):
+            dirs.add(a.rstrip("/"))
+    return dirs
 
 
 # ── workflow side ──────────────────────────────────────────────────────────────

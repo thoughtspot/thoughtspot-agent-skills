@@ -254,7 +254,7 @@ class TestSpecialFunctions:
         result = translate_sql_expr(
             "IFF(a.X > 0, 'positive', 'non-positive')", _resolve)
         assert result == \
-            "if ( [A::X] > 0 ) then 'positive' else 'non-positive'"
+            "( if ( [A::X] > 0 ) then 'positive' else 'non-positive' )"
 
     def test_div0(self):
         # BL-357: DIV0(NULL, 0) is NULL in Snowflake, safe_divide's 0 — so the NULL guard
@@ -305,7 +305,7 @@ class TestSpecialFunctions:
         result = translate_sql_expr(
             "NVL2(a.X, a.Y, a.Z)", _resolve)
         assert result == \
-            "if ( [A::X] != null ) then [A::Y] else [A::Z]"
+            "( if ( [A::X] != null ) then [A::Y] else [A::Z] )"
 
     def test_trunc(self):
         # BL-331: was round(x, 0) — which rounds, and is NULL in ThoughtSpot.
@@ -378,7 +378,7 @@ class TestCase:
     def test_simple_case(self):
         result = translate_sql_expr(
             "CASE WHEN a.X > 10 THEN 'high' ELSE 'low' END", _resolve)
-        assert result == "if ( [A::X] > 10 ) then 'high' else 'low'"
+        assert result == "( if ( [A::X] > 10 ) then 'high' else 'low' )"
 
     def test_multi_branch(self):
         result = translate_sql_expr(
@@ -392,7 +392,7 @@ class TestCase:
     def test_no_else(self):
         result = translate_sql_expr(
             "CASE WHEN a.X = 1 THEN 'one' END", _resolve)
-        assert result == "if ( [A::X] = 1 ) then 'one' else null"
+        assert result == "( if ( [A::X] = 1 ) then 'one' else null )"
 
 
 # ---------------------------------------------------------------------------
@@ -466,7 +466,7 @@ class TestNullif:
 class TestCoalesce:
     def test_two_args(self):
         result = translate_sql_expr("COALESCE(a.X, 0)", _resolve)
-        assert result == "if ( [A::X] != null ) then [A::X] else 0"
+        assert result == "( if ( [A::X] != null ) then [A::X] else 0 )"
 
     def test_three_args(self):
         result = translate_sql_expr("COALESCE(a.X, a.Y, 0)", _resolve)

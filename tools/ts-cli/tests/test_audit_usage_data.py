@@ -111,6 +111,9 @@ class Client:
             if json["query_string"] not in self.answers:  # a build that refuses the query
                 return _response(400, {"x": BODY_MARKER})
             return _response(200, self.answers[json["query_string"]])
+        if (json or {}).get("include_dependent_objects"):  # a clean "no dependents"
+            return _response(200, [{"metadata_id": m["identifier"],
+              "dependent_objects": {"dependents": {m["identifier"]: {}}}} for m in json["metadata"]], url)
         if url.endswith("/metadata/search"):
             meta = (json or {}).get("metadata") or [{}]
             if meta[0].get("name_pattern") == SYSTEM_MODEL_NAME:

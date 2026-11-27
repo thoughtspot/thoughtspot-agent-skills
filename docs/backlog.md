@@ -64,6 +64,8 @@ are roughly ordered by value÷effort.
 | Item | Summary | Target |
 |---|---|---|
 | BL-178 | from-Snowflake identifier resolution: 3-defect regression, every metric formula dangles | immediate |
+| BL-649 | Tableau, Sisense and Qlik conditionals (the BL-632 class): direct shapes fixed 2026-11-27; still open — Tableau later-pass splices (`ZN(IIF)+1`, `RADIANS`, `MID`), right operands, string concat | 2026-12-15 |
+| ~~BL-632~~ | ~~COALESCE / CASE / IF emitted unbracketed; ThoughtSpot's greedy `else` inverted MV `COALESCE(is_deleted, false) = false` filters~~ | DONE (2026-11-26) |
 | ~~BL-364~~ | ~~ThoughtSpot trigonometry is in radians; the Tableau translator and four maps converted by `180 / π`~~ | DONE (2026-10-07) |
 | ~~BL-365~~ | ~~`a * b / c` read as `a * ( b / c )` and a doubled quote read as two quotes: every formula emitter~~ | DONE (2026-10-07) |
 | ~~BL-232~~ | ~~`description` under `properties` silently dropped on import; five sites + `ts tml lint` I15~~ | DONE (2026-09-02) |
@@ -369,6 +371,15 @@ are roughly ordered by value÷effort.
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
 | BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
+| BL-629 | from-databricks-mv: a dimension referencing another dimension is emitted as a nonexistent table column; lint does not check formula exprs — converter fixed 2026-11-27; lint XREF over `formulas[].expr` still open | 2026-12-15 |
+| ~~BL-630~~ | ~~from-databricks-mv: a display-title clash between a column and a formula silently drops the column~~ | DONE (2026-11-27) |
+| BL-634 | from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped | 2026-12-15 |
+| BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` — Databricks fixed 2026-11-27; Snowflake id form and a lint rule still open | 2026-12-15 |
+| BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` | 2026-12-15 |
+| BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
+| BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
+| BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
+| BL-658 | Sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks | 2027-01-31 |
 
 ### Tier 3 — Opportunistic
 
@@ -518,7 +529,22 @@ are roughly ordered by value÷effort.
 | BL-620 | ts-audit usage (H17): review leftovers and open questions (non-admin auditors, the searchdata spec check, new Models, clock skew, cost, locale, nits) | 2026-12-31 |
 | BL-623 | ts-audit usage by Org: review nits deferred from the Org PR | 2026-12-31 |
 | BL-624 | ts-audit report: an Open-in-ThoughtSpot link beside every ThoughtSpot object, through one URL helper | 2026-12-31 |
-| BL-625 | ts-audit Dashboard: sort and filter Models by usage (parked 2026-11-26) | 2027-01-31 |
+| ~~BL-625~~ | ~~ts-audit Dashboard: sort and filter Models by usage~~ | RESOLVED (2026-11-26 — absorbed by the Usage view, ts-audit 3.28.0) |
+| BL-631 | from-databricks-mv: `display_title` title-cases names without display_name (`SKU Type` -> `Sku Type`) | 2027-01-31 |
+| BL-633 | `CAST(col AS STRING)` is dropped, including inside a `TO_DATE` pass-through | 2027-01-31 |
+| BL-635 | from-databricks-mv: whole-table dimension `MAX(expr) OVER ()` rejected as an unsupported LOD shape | 2027-01-31 |
+| BL-636 | from-databricks-mv file-only path has no route when the warehouse cannot be described (column types must be inferred) | 2027-01-31 |
+| BL-641 | from-databricks-mv: no entry point for Metric View YAML files without workspace access | 2027-01-31 |
+| BL-642 | from-databricks-mv: converting several MVs over shared tables needs one table set and one import plan | 2027-01-31 |
+| BL-644 | Record live findings from the MV validation in the mapping and AgentQL docs (pass-through LIKE fidelity, `OVER ()` LOD form, epoch-second dates) | 2027-01-31 |
+| BL-646 | ts-dependency-manager and `ts share`: take a ts-audit candidates file | 2027-01-31 |
+| BL-647 | ts-audit: investigate a ThoughtSpot Liveboard (Muze, HTML widgets) as the audit's output, fed by a push to the warehouse | 2027-02-28 |
+| BL-648 | ts-audit Usage view (3.28.0): review nits deferred | 2027-01-31 |
+| BL-650 | SQL translators: `NOT x BETWEEN a AND b` binds NOT to the operand, and `x IN (SELECT …)` reads the subquery as a column | 2027-01-31 |
+| BL-651 | ts-audit: four small defects from the 2026-11-27 SE run (D8 GUID flips with API order, empty audit date, Usage view details, owner emails in the export) | 2027-01-31 |
+| BL-654 | Test-suite time: pre-commit in parallel, a lighter pytest matrix, then heavy areas by path | 2027-01-31 |
+| BL-655 | `test_worked_examples.py` breaks on pytest 10 (class-scoped fixture as an instance method) | 2027-01-31 |
+| BL-659 | Sisense `--target-model`: round-6 review leftovers (`isBetween`/`isCondition` accepted with any value, field_map onto an unreachable instance, two masked no-`datatype` gaps) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -545,6 +571,8 @@ are roughly ordered by value÷effort.
 | BL-261 | `build-sv --help` cites `ts tml export --output-dir`, which does not exist | next `commands/snowflake.py` change |
 | ~~BL-273~~ | ~~`tools/ts-cli/CLAUDE.md:153` asserts `Current version: 0.135.0`; package is at 0.139.0 and nothing gates the line~~ | DONE (2026-09-22) |
 | BL-440 | ThoughtSpot formula output built as text, precedence repaired afterwards — move to a tree + printer (after BL-441) | after BL-441 |
+| BL-643 | from-databricks-mv: offer one combined Model when several MVs were split only by the chasm trap (parked 2026-11-26) | user request to resume |
+| BL-656 | pytest-xdist PR review leftovers: `_NO_XDIST` match, worker count in evidence, CHANGELOG figures, untested Chrome call sites | 2027-01-31 |
 
 ---
 
@@ -18969,7 +18997,9 @@ can build the link. **Target:** 2026-12-31.
 4. **Tests:** every link is built through the helper and escaped; a headless-Chrome test
    per view asserts the icon's href for a synthetic cluster URL.
 
-## BL-625 — ts-audit Dashboard: sort and filter Models by usage `Tier 3`
+## BL-625 — ts-audit Dashboard: sort and filter Models by usage `Tier 3` — **RESOLVED 2026-11-26**
+
+**Status:** RESOLVED (2026-11-26, ts-audit 3.28.0): absorbed by the Usage view (`#usage`), whose triage table sorts every audited Model by last use and filters it by status (Active, Idle, Never queried, Too new, Not judged) and by "No dependents". The Dashboard heatmap is unchanged.
 
 **Filed:** 2026-11-26. **Source:** user request 2026-11-25 (approved, then parked on
 2026-11-26 to end the build round on a stable skill). **Target:** 2027-01-31.
@@ -19100,3 +19130,872 @@ Nits the two reviews raised and the PR did not fix:
     environment exports, Keychain, token caches, SSH keys and agents, key files, git
     credential helpers, `gh` auth), and :161's "never run … the PR's tests" should point
     at that exception.
+---
+
+## BL-629 — from-databricks-mv: a dimension that references another dimension is emitted as a nonexistent table column `Tier 2`
+
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.3: the converter resolves a dimension named in a later dimension or a measure, under Databricks scope rules live-probed 2026-11-27 (`name` only; earlier dimensions only; one shadows a same-named source column; `filter:` reads source columns). Still open: a direct dimension whose expression is another dimension's name; a simple aggregate or `COUNT(DISTINCT)` over a computed dimension; a skipped earlier dimension, whose name then falls through to a same-named source column where Databricks would read the dimension (also on main); a window `order:` over a computed dimension that names an earlier one (`month: DATE_TRUNC('MONTH', date)` with `date` a dimension) still orders by a nonexistent column (also on main); a reference by formula id does not carry the referenced formula's `week_start_assumption` annotation; LOD and scalar-subquery positions are unprobed and keep the source-column reading; and the lint XREF extension to `formulas[].expr`. Also noticed, pre-existing: a `DATE'2026-01-05'` literal emits `[SRC::DATE] to_date(…)`). **Source:** converting three customer Metric Views offline with
+`ts databricks parse-mv` / `translate-formulas` / `build-model` (ts-cli 0.224.1).
+**Target:** 2026-12-15.
+
+**What.** A Metric View dimension may name another dimension: `QUARTER(order_month)`, or a
+CASE over a backticked display name (`` CASE WHEN `Channel Description` ILIKE '%web%' … ``).
+`translate-formulas` resolves every bare identifier through `resolve_parts`
+(`tools/ts-cli/ts_cli/databricks/mv_translate.py:46-67`), which maps a name with no alias
+prefix to the `source` table, so the output is a fake column on the fact table:
+
+    QUARTER(order_month)          -> quarter_number ( [ORDERS::order_month] )
+    `Channel Description` ILIKE … -> sql_bool_op ( "{0} ILIKE …" , [ORDERS::Channel Description] )
+
+The right targets are the other dimension's formula (`[formula_Month]`, via `formula_id`
+at `mv_translate.py:70`) or, for a direct-column dimension, its column
+(`[DIM_CHANNEL::DESCRIPTION]`). Measures already get this treatment (`MEASURE()` inlining);
+dimensions do not.
+
+**Why it matters.** The Model fails at import: there is no such column. The pre-import gate
+does not see it. `ts tml lint --dir`, with the generated Table TMLs in the batch, returned
+`clean: true` on a Model carrying `[ORDERS::order_month]` (probed 2026-11-26), because
+`lint_cross_references` (`tools/ts-cli/ts_cli/tml_lint.py:690`) checks `column_id` and join
+`on:` references only and states that `formulas[].expr` is out of scope.
+
+**Fix direction.** In `translate-formulas`, resolve an identifier that matches a dimension's
+`name` (or backticked display name) before treating it as a column: emit the dimension's
+`[formula_<Title>]` for a computed dimension, its column for a direct one, with a
+dependency order like the measure DAG. Separately, extend XREF to `[TABLE::COL]` references
+inside `formulas[].expr`. That would have caught this, and any later case of this class.
+
+---
+
+## BL-630 — from-databricks-mv: two columns with one display name, and a direct column is silently dropped `Tier 2`
+
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.225.3: build-model fails loud on a column-vs-formula title clash). **Source:** as BL-629. **Target:** 2026-12-15.
+
+**What.** One MV had `order_month` with `display_name: Month` (a formula) and a direct
+dimension `Month: source.MONTH` (month number). `build-model` exited 0 and the Model had one
+`Month`: the month-number column was gone, with nothing in `name_renames` or on stderr. Two
+other MVs differed only in that `Month` was computed (`MONTH(order_month)`), and those
+failed loud: `duplicate display title(s): ['Month']`.
+
+The difference is the order of two passes in `mv_build_model.py`:
+`resolve_name_collisions` (call at line 108) runs first, and its column-vs-formula rule in
+`tools/ts-cli/ts_cli/formula_common.py:437-442` keeps the formula and drops any column with
+the same name. It computes `dropped` and never reports it. Only a formula-vs-formula clash
+reaches `_check_no_duplicate_display_names` (`mv_build_model.py:400`, called at 428).
+
+**Why it matters.** A column the source defines disappears from the Model, silently. The
+loud path shows the converter already treats a clash as an error, so the two cases should
+behave the same.
+
+**Fix direction.** Fail loud on every display-title clash, or rename deterministically and
+report it in `name_renames`. `resolve_name_collisions` is shared (`formula_common`) with
+other converters, so check what they rely on before changing the drop. The minimum is to
+surface `dropped` instead of discarding it.
+
+---
+
+## BL-631 — from-databricks-mv: `display_title` title-cases names that have no display_name, mangling acronyms `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+
+**What.** `display_title` (`tools/ts-cli/ts_cli/databricks/mv_translate.py:76-78`) returns
+`entry["name"].replace("_", " ").title()` when there is no `display_name`. That is right for
+`order_month` → `Order Month`. But a v1.1 MV names most dimensions in their final form, and
+those get re-cased: `SKU Type` → `Sku Type`, `Is eBook` → `Is Ebook`, `API Channel` →
+`Api Channel`.
+
+**Why it matters.** The column names users and Spotter see are not the ones the source
+author wrote. No numbers change.
+
+**Fix direction.** Title-case only a snake_case identifier (no spaces, contains `_` or is
+all lower case). Use any other `name` verbatim. The workaround used was to set
+`display_name = name` in `parsed.json` before `build-model`.
+
+---
+
+## BL-632 — COALESCE translates to an unparenthesised if/then/else, so an operator after it binds inside the else branch `Tier 1`
+
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-26, fix/bl-632-coalesce-precedence, ts-cli 0.225.1) for the
+Databricks and Snowflake translators; the Tableau, Sisense and Qlik translators have the same defect, BL-649. **Raised to Tier 1
+2026-11-26** on the live probe below: a silent wrong answer in two shipped converters.
+
+**What.** `_sqlf_coalesce_chain` (`tools/ts-cli/ts_cli/sql_forms.py:200-204`) emits
+`if ( a != null ) then a else b` with no outer parentheses, and the caller appends the rest
+of the expression. Reproduced with `translate_sql_expr`:
+
+    COALESCE(source.D, false) = false   ->  if ( [F::D] != null ) then [F::D] else false = false
+    COALESCE(source.D, 0) + 1           ->  if ( [F::D] != null ) then [F::D] else 0 + 1
+    (COALESCE(source.D, false)) = false ->  ( if ( … ) then [F::D] else false ) = false   (correct)
+
+The first is the shape of a common MV global filter (`COALESCE(is_deleted, false) = false`).
+`build-model` turns it into the `MV Filter` formula that every query is filtered on.
+
+**Why it matters.** Whether this is right depends on how ThoughtSpot parses an `else`
+branch, and no doc in this repo stated it.
+
+**Live-confirmed 2026-11-26 (simba-test, Databricks connection, synthetic fixture).** The
+`else` is greedy. The MV filter `if ( [F::D] != null ) then [F::D] else false = false` compiles to
+
+    WHERE CASE WHEN NOT(D IS NULL) THEN D ELSE (FALSE = FALSE) END IN (TRUE)
+
+so it keeps the rows where `D` is TRUE and the rows where it is NULL, and drops the rows where it
+is FALSE: the filter is inverted. A total that should be 361,523 (not deleted) came back 40,173
+(20,726 deleted + 19,447 NULL-flag). It imports and lints clean, with no error anywhere. By the
+same reading `COALESCE(x, 0) + 1` loses the `+ 1`.
+
+**Where it reaches.** `sql_forms` is shared: `sv_sql.py` imports it too, so the Snowflake
+converter emits the same form.
+
+**Fix direction.** Parenthesise the emitted chain, and emit `ifnull ( a , b )` for the
+two-argument case (`IFNULL`/`NVL` already take that path at `sql_forms.py:195-196`);
+`ifnull ( D , false ) = false` was live-verified correct in the same run. Add the
+greedy-`else` rule to the formula patterns doc. Then tell users of both converters which
+Models to re-convert: any with a `COALESCE` followed by an operator.
+
+---
+
+## BL-633 — `CAST(col AS STRING)` is dropped, including inside a pass-through such as `TO_DATE` `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+
+**What.** `TO_DATE(CAST(fact.DATE_KEY AS STRING), 'yyyyMMdd')`, the usual way to turn an
+integer `yyyyMMdd` key into a date, translates to
+
+    sql_date_op ( "to_date({0}, 'yyyyMMdd')" , [FACT::DATE_KEY] )
+
+`STRING` is in `CAST_TYPES_WIDENING` (`tools/ts-cli/ts_cli/formula_common.py:52-55`), so
+`_construct_cast` (`tools/ts-cli/ts_cli/databricks/mv_sql_constructs.py:165-195`) returns the
+inner expression unchanged. Inside a `sql_*_op` pass-through the warehouse then receives
+`to_date(<int>, 'yyyyMMdd')`, an expression the source never wrote.
+
+**Why it matters.** Whether Databricks accepts `to_date(INT, fmt)` through implicit casting
+was not live-checked. If it does, the result matches. If not, every query that touches the
+column fails. Treating a cast to string as a no-op is also wrong more generally:
+ThoughtSpot `concat` and string comparisons do not promote a number.
+
+**Fix direction.** Keep `CAST(x AS STRING)` as `to_string ( x )` in ThoughtSpot context and
+as the literal `CAST({0} AS STRING)` inside a pass-through template. Remove `STRING`,
+`VARCHAR`, `TEXT` and `CHAR` from the widening set for the Databricks engine.
+
+---
+
+## BL-634 — from-databricks-mv: a window ordered by a date built from an integer key is refused, so semi-additive measures on it are skipped `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2026-12-15.
+
+**What.** Warehouses with integer date keys commonly order a semi-additive window by a
+derived date:
+
+    - name: order_month
+      expr: TO_DATE(CAST(source.DATE_KEY AS STRING), 'yyyyMMdd')
+    measures:
+      - name: Opening Balance
+        expr: SUM(source.OPENING_BALANCE)
+        window: [{order: order_month, semiadditive: first, range: current}]
+
+`_find_order_dim` (`tools/ts-cli/ts_cli/databricks/mv_window_translate.py:175-232`) accepts a
+direct column, a `DATE_TRUNC` of one, or a date-shifted `DATE_TRUNC`. Anything else is
+refused with "cannot determine the physical sort column" (line 230). Every measure windowed
+on that dimension goes to `skipped[]`, along with every measure that references one: in the three MVs converted, 12 windowed
+opening/closing balance measures plus 5 variances and averages built on them.
+
+**Why it matters.** The skip is loud, but these are usually the headline measures of a
+balance or subscriber model. The workaround used was to point `window.order` at a synthetic
+direct dimension over the integer key. A `yyyyMMdd` integer sorts exactly as the date does,
+so `first_value(sum(m), query_groups(), {[FACT::DATE_KEY]})` is the same ordering.
+
+**Fix direction.** Either recognise `TO_DATE(CAST(<int col> AS STRING), '<yyyyMMdd-family
+format>')` as day grain with `sort_ref` = the integer column (exact, because the format is
+order-preserving), or order by the dimension's own formula, as the shifted-week branch
+already does at line 208. The second is the general fix, but `first_value`/`last_value`
+ordered by a formula needs a live check first.
+
+---
+
+## BL-635 — from-databricks-mv: a whole-table dimension `MAX(<expr>) OVER ()` is rejected as an unsupported LOD shape `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+
+**What.** `Latest Data Month: MAX(TO_DATE(…)) OVER ()`, the latest loaded period used to
+flag a partial month-to-date, fails `parse-mv` with "window function without the
+recognized AGG(...) OVER (PARTITION BY ...) LOD shape". `_LOD_RE`
+(`tools/ts-cli/ts_cli/databricks/mv_expr.py:63-65`) requires `PARTITION BY`, so the empty
+`OVER ()` falls through to the unsupported branch. The parse exits 1, and every dimension
+that references it is lost too (here `Is Month To Date`).
+
+**Mapping used by hand.** `group_aggregate ( max ( [formula_Month] ) , { } , { } )`, with
+the MV `filter:` carried as the model-level `filters:` block. Per the A3 finding
+(`docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`), the `{}` third argument ignores
+search filters but respects the model filter, which matches a DBX window evaluated after
+the MV's global filter. The whole-table scalar-subquery path already emits this form
+(`mv_translate.py:138`). **Live-verified 2026-11-26** (simba-test against a Databricks
+fixture): the dimension alone, grouped on with plain and semi-additive measures, matches the
+MV exactly, over a `sql_date_op` formula. **But** a row-level flag compared against it is
+wrong in ThoughtSpot; see BL-638 before emitting that pattern.
+
+**Fix direction.** Accept `AGG(expr) OVER ()` as an LOD with an empty partition (`{ }`), and
+use `{ }` rather than `query_filters()` as the filter argument when the MV has a global
+`filter:`. Live-verify one case before shipping.
+
+---
+
+## BL-636 — from-databricks-mv file-only path has no route when the warehouse cannot be described `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629: the MV YAML was available, the workspace
+was not. **Target:** 2027-01-31.
+
+**What.** The file-only path (Step 10-FILE, `create: true` in `tables.json`) requires a
+`dbx_type` for every column, taken from `DESCRIBE TABLE`. When only the MV definitions are
+available, nothing produces the Table TMLs. The column list had to be scraped from the
+generated Model's `[T::C]` and `column_id` references, and types guessed from names and
+usage (`*_KEY` → bigint, summed → bigint, flags used in a boolean `COALESCE` → boolean, the
+rest string). Related to L11 (classification on the same path), which does not cover types.
+
+**Why it matters.** Wrong types fail the Table import, or worse, a DECIMAL read as bigint.
+The skill does not say this case exists.
+
+**Fix direction.** A `--infer-columns` mode on `build-model` that derives the column set per
+table from the parsed MV, marks every type `inferred`, and writes those types into a review
+list. The skill's Step 10-FILE then says to check them against `DESCRIBE TABLE` before import.
+
+---
+
+## BL-637 — Arithmetic over `first_value` / `last_value` fails import unless each call is wrapped in `sum ( )` `Tier 2`
+
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.3: Databricks wraps the calls after cross-measure inlining and in a multi-aggregate semi-additive window, `sql_forms.sqlf_aggregate_window_values`; still open: the Snowflake translator references such a metric by formula id, and whether `sum ( [formula_X] )` imports is unprobed; and the lint rule). **Source:** live validation of three converted Metric Views on
+simba-test against a Databricks fixture. **Target:** 2026-12-15.
+
+**What.** A measure built from two semi-additive measures, such as
+`(MEASURE(opening) + MEASURE(closing)) / 2` or `MEASURE(actual_open) - MEASURE(budget_open)`,
+is inlined by cross-measure inlining into
+`( ( first_value ( sum ( [T::a] ) , query_groups ( ) , { [T::d] } ) ) + ( last_value ( … ) ) ) / 2`.
+ThoughtSpot rejects the whole Model at import: *"Formula addition failed … Aggregation
+function must be applied directly over a rank-related function."* Removing the extra
+parentheses, referencing the two formulas by id, and dropping the column's `aggregation:`
+all fail the same way (probed live).
+
+**What works.** Wrapping each call in `sum ( )`:
+`( sum ( first_value ( … ) ) + sum ( last_value ( … ) ) ) / 2`. It imports, and matched
+Databricks cell for cell at total, per-dimension, per-month and filtered grains. (A
+`sum_if ( [d] = group_aggregate ( min ( [d] ) , query_groups ( ) , query_filters ( ) ) , [a] )`
+form also matched, but is the bigger change.) When `first_value`/`last_value` is the whole
+formula, it stays unwrapped; AgentQL queries that with `SUM()` already.
+
+**Where.** Cross-measure inlining in `ts_cli/databricks/mv_translate.py` (the `MEASURE()`
+substitution). The Snowflake translator inlines metric references the same way, so check
+`sv_translate.py` / `sv_window.py` too.
+
+**Fix direction.** After inlining, wrap every `first_value`/`last_value` call that is not
+the whole expression in `sum ( )`. Add a `ts tml lint` rule for the shape, since the
+converter output linted clean and only the import caught it.
+
+---
+
+## BL-638 — A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers in ThoughtSpot `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** as BL-637. **Target:** 2026-12-15.
+
+**What.** An MV dimension such as `is_partial_period: period = latest_period`, where
+`latest_period` is `MAX(period) OVER ()`, converts to
+`[formula_Period] = [formula_Latest Period]` over `group_aggregate ( max ( … ) , { } , { } )`.
+It imports, but ThoughtSpot's generated SQL is wrong in two ways (both read from
+`ts agentql generate-sql`, and confirmed against the Databricks numbers):
+
+1. **Grouped by the flag:** the CTE that computes the flag per period has no `GROUP BY`,
+   so it carries one row per fact row and the join to the measure CTE fans out. Every
+   measure was inflated by roughly 20x to 900x.
+2. **Filtered on the flag:** the flag's dependency pulls the period into the grain, and
+   `first_value`/`last_value` are partitioned by it. Each period is its own "first", and
+   the result is the sum over all periods. Plain sums were correct.
+
+Comparing the raw integer key to `group_aggregate ( max ( [T::key] ) , { } , { } )`
+behaves identically, so the formula's form is not the cause.
+
+**Forms tried (all live, all against the Databricks numbers).** Comparing the raw integer key,
+or wrapping both sides in `start_of_month ( )`, fails identically. Wrapping the LOD in an outer
+`max ( )` is rejected at import, and would make the flag a measure anyway. A `today()`-based
+flag matched, but only because the fixture's last month was the current month. It changes the
+meaning to "current calendar month", so it was rejected.
+
+**Workaround used.** A scalar subquery in a pass-through, with no LOD:
+`sql_bool_op ( "{0} = (SELECT MAX(<period expr>) FROM <fact fqn> WHERE <MV filter>)" , [formula_Period] )`.
+It keeps the MV's meaning and matched in every shape, including grouping and filtering with
+semi-additive measures. Its cost: the fact table's FQN and the MV filter are written into the
+formula as text, so they must be edited per environment, and lineage does not see them. A
+one-row SQL View (`SELECT MAX(key)`) LEFT-joined on the key also matched; it was not chosen,
+to avoid an extra object.
+
+**Fix direction.** (a) Raise the SQL generation defect with the ThoughtSpot query
+team, with the two `generate-sql` outputs (a reproduction on a two-table fixture). (b)
+Until fixed, have the converter emit the subquery pass-through (it has the MV source FQN and
+`filter:`), annotated. It must not emit the LOD comparison silently, because the numbers are wrong
+with no error.
+
+---
+
+## BL-639 — from-databricks-mv: no numeric fidelity step after import `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** live validation of three converted Metric Views on
+simba-test against a synthetic Databricks fixture (see BL-637). **Target:** 2026-12-15.
+
+**What.** The skill ends at import and a summary report. In this run `ts tml lint` passed TML
+that could not import (BL-629, BL-637), and import accepted a Model that returned wrong
+numbers (BL-638). Only a cell-by-cell comparison of the same queries on both sides caught
+the last one. A prototype harness ran every measure through `MEASURE()` on the MV and AgentQL
+on the Model, over about 20 query shapes, and diffed 6,549 cells.
+
+**Fix direction.** `ts databricks verify`: given the MV FQN, the Model GUID and a list of query
+shapes (default: total, each shared dimension, the window order dimension), run both sides and
+report mismatches per measure. Wrap measures for AgentQL by the existing classify rule (`SUM`
+for raw columns and bare `first_value`/`last_value`, `AGG` otherwise). Normalise DATE values,
+which AgentQL returns as epoch seconds at midnight in the cluster time zone. A new skill step
+runs it when a warehouse and cluster are available.
+
+**The shapes must discriminate.** Two of this run's results passed only on lucky fixtures. A
+`today()`-based flag matched because the last fixture month was the current month, and a
+whole-table LOD looked right until a search filter was applied. Required shapes: group by
+and filter on every boolean flag; semi-additive measures across several periods; a search
+filter beside every LOD column; rows with NULL or unmatched foreign keys; case-sensitive
+`LIKE`. Required fixture property: the latest data period is not the current one. Related:
+angle 15 in `.claude/rules/repo-audit.md`.
+
+---
+
+## BL-640 — Conversion skills: a meaning-changing workaround must be approved at the review checkpoint `Tier 2`
+
+**Filed:** 2026-11-26. **Source:** as BL-639. **Target:** 2026-12-15.
+
+**What.** When a faithful translation failed (BL-638), the flag "latest month in the data" was
+replaced with "current calendar month" to make the numbers match, without asking. The user
+rejected it, and a faithful form existed (a scalar-subquery pass-through). Nothing in the
+skill's Step 10 review prompts for this.
+
+**Fix direction.** Step 10 lists every formula that differs from the direct translation, with
+the semantic difference stated in one line, and waits for approval of each. Apply the same
+rule in the other `ts-convert-from-*` skills that have a review checkpoint.
+
+---
+
+## BL-641 — from-databricks-mv: no entry point for Metric View YAML files `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629: the MV definitions arrived as exported text
+files, with no workspace access. **Target:** 2027-01-31.
+
+**What.** Steps 1-4 assume a Databricks profile and fetch the YAML with `DESCRIBE TABLE
+EXTENDED`. Starting from files means skipping them by hand and normalising Windows line
+endings before `parse-mv`. The MV-on-MV check (Step 5) and table introspection cannot run,
+and the skill does not say what is lost.
+
+**Fix direction.** A "YAML files" entry at Step 0: read the files, strip `\r`, skip Steps 1-4,
+and record that source-type checks and column types are unverified (BL-636 for the types).
+
+---
+
+## BL-642 — from-databricks-mv: several MVs over shared tables need one table set and import plan `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-629: three MVs shared 10 of their 13 tables.
+**Target:** 2027-01-31.
+
+**What.** The skill converts one MV at a time, and `build-model` writes Table TML per Model.
+For a set of MVs, the tables were de-duplicated by hand and imported in a hand-made order
+(Tables, then their GUIDs stamped into each Model's `model_tables[].fqn`, then the Models).
+Name-only table references in a Model resolve wrongly if the cluster already has a Table of
+that name.
+
+**Fix direction.** A batch mode: one `tables.json` across the MVs, one Table TML per physical
+table, and an import plan that stamps GUIDs before the Model import.
+
+---
+
+## BL-643 — from-databricks-mv: offer one combined Model for MVs split by the chasm trap `Tier 4`
+
+**Filed:** 2026-11-26. **Source:** as BL-629; **parked by the user 2026-11-26**. **Trigger:**
+user request to resume.
+
+**What.** A Metric View cannot span two facts with a shared dimension, so customers split them
+(here: actuals and actual-vs-budget). ThoughtSpot handles the chasm trap, so the skill could
+offer one Model over all the facts. Requirement found: the facts must share a date dimension
+*table*. Here each MV computed its month from its own key, so a calendar table (or SQL View)
+joined on the date key is needed first. The same calendar view can carry "latest period" and
+"is month to date" as SQL columns, which avoids BL-638 entirely. Going to the lowest grain
+(daily subscriber fact plus budget) was also explored: it covers the base, additions, churn and
+reactivation measures, but not the cohort measures without an activation date.
+
+---
+
+## BL-644 — Record the MV validation's live findings in the mapping and AgentQL docs `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-639. **Target:** 2027-01-31.
+
+**What.** Three findings from the live comparison are in no reference doc:
+
+1. `sql_bool_op` pass-throughs of `LIKE` / `ILIKE` keep Databricks' case sensitivity exactly;
+   a native `contains` would not (it is case-insensitive, BL-333). Matched on a fixture with
+   mixed-case values.
+2. `group_aggregate ( max ( x ) , { } , { } )` reproduces a dimension `MAX(x) OVER ()`
+   exactly, including ignoring a search filter while keeping the Model filter (BL-635).
+3. AgentQL `fetch-data` returns a DATE as epoch seconds at midnight in the cluster time zone,
+   not UTC.
+
+**Fix direction.** Add (1) and (2) to `ts-databricks-formula-translation.md`, and (3) to the
+AgentQL skill's `agentql-rules.md` (regenerating the offline bundle).
+
+## BL-645 — pr-ready fast checks: review leftovers, and the docs-only review effort `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the `pr-ready` review of `feat/pr-ready-scoped-checks`.
+**Target:** 2027-01-31.
+
+1. **Docs-only reviews at `high` (moved out of that PR, one purpose per PR).** Approved by
+   the maintainer: a docs-only diff is reviewed and re-reviewed at effort `high`, where
+   docs-only is an explicit list of people-facing docs. The review found the first
+   attempt's block classed mapping docs (`docs/function-maps/`), plans kept under
+   `docs/superpowers/specs/`, generated files without an uppercase marker
+   (`docs/open-items-index.md`, fidelity reports), deletions, renames and a new
+   `CLAUDE.md` as docs-only, and that it lacked `set -o pipefail`. Rebuild it as an
+   explicit path list; refuse any D/R/C from `git diff --name-status -M`; read names with
+   `-z`; test it as `test_pr_reviewer_brief.py` runs Step 1's block; take the PR template
+   off the list (agents fill it and it carries the confidentiality checkbox); and record
+   the exception in `.claude/rules/model-routing.md` and spec §5 C2 so they do not still
+   read "effort max" unqualified.
+2. **`docs/quality-gates.md` shows the unit-test trigger raw** (`if [ -n "$PY_STAGED" ]`):
+   teach `_humanise_trigger` in `generate_quality_gates.py` the new condition.
+3. **Step 7 has no path for a CI suite failure found after the review.** A fast default
+   makes that more likely; say whether its fix commit needs a re-review.
+
+## BL-646 — ts-dependency-manager and `ts share`: take a ts-audit candidates file `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the ts-audit Usage view (3.28.0), which exports the
+Models a reviewer selects as a `ts-audit-candidates/1` JSON file. **Target:** 2027-01-31.
+
+**What.** A list input that reads that file (its format is in ts-audit SKILL.md, "Candidates
+file"), for two consumers:
+
+1. **ts-dependency-manager.** One combined dry run and impact report across every GUID in the
+   file, with the overlaps shown (an Answer or Liveboard that depends on two of the listed
+   Models is one object, reported once against both), then the per-object delete with backup
+   and rollback as today.
+2. **`ts share`.** Revoke sharing on the same list: the gentler first step, which hides the
+   Models from their users without deleting anything, so a Model someone still needs is
+   found by the request to restore access.
+
+**Why.** Today both act on one object at a time (`ts dependency cascade-preview` and
+`cascade-delete` take one ref), so retiring the dozen or so idle Models a Usage view
+selects is a dozen separate runs and a dozen separate reports, and an overlap between two
+of them is seen by neither.
+
+**Notes.** Read the file's `format` and refuse a version it does not know. Treat each
+object's `status` and `dependents_total` as what the audit saw when it read the usage
+(`usage.read_at`), not as current: re-read dependents before any change.
+
+
+## BL-647 — ts-audit: investigate a ThoughtSpot Liveboard as the audit's output `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** user direction: rather than build ever more custom HTML,
+push the audit's results to a destination and present them in a Liveboard, so a later run is
+only a data refresh. **Target:** 2027-02-28 (investigation and a recommendation; the build
+follows as its own items).
+
+**Idea.** `ts audit` gains a push of its results to a destination table set; a Model and a
+Liveboard are built once over those tables and shipped as TML; each run appends.
+
+**Investigate:**
+
+1. **What a Liveboard can draw.** Muze custom charts (`ts-object-liveboard-chart-builder`),
+   and ThoughtSpot's full HTML widgets / custom visualisations, for each view the HTML report
+   has today: the Dashboard heatmap, the scorecard, Cross-Model, Cleanup, the Usage quadrant and
+   triage table (3.28.0), Data Cache, the Formulas tree and graph, the ERD, and the planned
+   platform map. Per view: native chart, Muze, HTML widget, or not possible. Note interactivity
+   (drill-down, selection, export), size limits, and whether an HTML widget can be fed from the
+   Model's data.
+2. **Tables.** A small star keyed by `run_id`, so runs append and trends come free:
+   `audit_run` (cluster, Org, read date, versions), `audit_model` (per Model: usage, status,
+   owner, created, dependents, readiness), `audit_finding`, `audit_usage_unmatched`. Derived
+   from the audit JSON and versioned, like `ts-audit-candidates/1`.
+3. **Push.** Snowflake first (the existing Snowflake profile and `ts-load-source-data`),
+   Databricks later. Read-only on ThoughtSpot, write-only to the named schema.
+4. **Selection and hand-off.** Whether a Liveboard can produce the candidates list (BL-646's
+   input): a selection, a filtered Answer export, or an HTML widget's export.
+5. **Open questions:** findings carry object, Org and owner names, so the destination must be
+   the customer's own warehouse; one Liveboard per cluster or per Org; retention of past runs;
+   what stays in the HTML report (offline use, a cluster with no warehouse to write to).
+
+**Output:** a short recommendation (per view: where it lives) and the build items that follow.
+
+## BL-648 — ts-audit Usage view (3.28.0): review nits deferred `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** the pr-ready review of `feat/audit-usage-page`; triaged
+under pr-ready Step 7. **Target:** 2027-01-31.
+
+**What.**
+
+1. `usage_triage.py` `created_date`: an out-of-range `created` (1e17) raises and aborts the
+   run; H17 only compares numbers.
+2. `report/usage_quadrant.js`: the ±3 px jitter is wider than about 1 px per day near the
+   90-day line, so a dot at 89 or 90 days can be drawn on the wrong side (colour and
+   `data-quadrant` stay right).
+3. `views/usage.js`: an audit with no audited Models says the report "predates the Usage
+   view", with backticks shown literally.
+4. The candidates file says `window_days: 180` and `queries_180d` when the history is
+   shorter; it carries no history start.
+5. "Not recorded" (Owner cell, SKILL.md) also covers a header that was not read.
+6. `usage_triage.py`'s docstring says H17 imports it (H17 imports `usage.py`); `headers_by_id`
+   and `created_date` repeat `engine/code_rules_human._created_by_id` and `usage.iso_date`.
+7. The idle-days test exercises only the fallback.
+8. Export: no test writes a real file; the object URL is revoked at 0 ms (reported to break
+   downloads in some browsers); the CSV has no UTF-8 BOM, so Excel on Windows may garble
+   non-ASCII owner names and the curly quotes in `usage_scope`.
+9. `tools/ts-cli/CLAUDE.md`'s `REPORT_LIBS` list misses `usage.js`, `usage_quadrant.js` and
+   `usage_export.js`.
+10. BL-625 item 2 asked for chips that combine with the angle and severity filters; the view
+    gives a Worst-finding sort instead, and BL-625's resolution does not say that part was
+    dropped.
+11. The quadrant's grey band holds both Too new / not judged Models and Models whose Sets
+    were not read; each keeps its status colour, so the band mixes colours.
+
+From the re-review of the fix rounds:
+
+12. **H4 has the Usage view's old blind spot** (on main since before 3.28.0): "A Model the
+    dependents lookup did not list has none" (`catalog/rules/human.yaml`), so a VIEW-only
+    auditor whose Model's Liveboards are hidden (`hasInaccessibleDependents` without
+    `areInaccessibleDependentsReturned`), or an odd response shape, gets "Orphan model".
+    3.28.0 now records those Models as `dependents_incomplete`; H4 should not fire on them.
+13. A snapshot written before 3.28.0 cannot say which Models had hidden dependents, so the
+    Usage view reads their totals as complete (flagged on the page and as
+    `corpus.usage.dependents_checked: false`).
+14. The `--snapshot-out` description in the README does not name the `sets_incomplete` and
+    `dependents_incomplete` files; SKILL.md's "as ThoughtSpot's dependents lookup returns
+    them" is loose for Sets (the cohort listing); `dependents_scope` could point at
+    `usage.org`; `views/usage.js` reads a Model with no triage as 0 dependents (only a
+    hand-edited JSON reaches it); no test covers `discover_sets`' `unrecognised_row` path.
+---
+
+## BL-649 — Tableau, Sisense and Qlik translators emit unbracketed conditionals (the BL-632 class) `Tier 1`
+
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.2: the direct shapes below are fixed; see "Still open"). **Source:** the adversarial review of the BL-632 fix. **Target:** 2026-12-15.
+
+**What.** ThoughtSpot's `else` is greedy (BL-632, live-verified): `if ( c ) then a else b + 1`
+adds 1 only on the else branch. BL-632 fixed the Databricks and Snowflake translators. Two
+others still emit a bare conditional and splice it into a larger expression:
+
+- **Tableau** (`ts_cli/tableau/conditionals.py`: `convert_iif`, `convert_if_then`, the
+  CASE rewrite): `IIF([a] > 1, 1, 0) + 1`, `IF [a] > 1 THEN 1 ELSE 0 END + 1` and
+  `CASE [b] WHEN 'x' THEN 1 ELSE 0 END * 2` all come out with the operator inside the
+  else branch.
+- **Sisense** (`ts_cli/sisense/functions.py`): `IF([a] > 1, 1, 0) = 1` becomes
+  `if (…) then 1 else 0 = 1`, with status TRANSLATED.
+
+- **Qlik** (`ts_cli/qlik/functions.py`): `If(a > 1, 1, 0) * Sum(b)` returns
+  `if ([TABLE::a] > 1) then 1 else 0) * sum([TABLE::b]`, unbalanced, with status TRANSLATED
+  (simpler shapes such as `if(a > 1, 1, 0) + 1` are refused).
+
+Power BI already brackets them.
+
+**Fix direction.** Bracket each emitted conditional, as `sql_forms.sqlf_if_chain` does. Tableau's
+text-rewriting pipeline needs care: `ensure_else_clause` inserts a missing `else` by walking
+each `if … then` block, so the bracket must enclose the inserted clause. Reuse
+`tests/test_conditional_grouping.py`'s detector, with its known gaps fixed (it misses a
+conditional's group closing early and treats `else b + 1` inside a group as a leak; no `in`).
+
+
+**Still open after ts-cli 0.225.2** (found by the PR #763 review; each is the same on main):
+
+1. **A later Tableau pass splices a bare conditional before an operator.** Grouping is decided from
+   the text after the block when it is converted, and later passes change that text:
+   `ZN(IIF([a]>1,[x],[y])) + 1` → `if … else [y] + 1` (`strip_ifnull_zero`, `cleanup.py`);
+   `RADIANS(IIF(…))` / `DEGREES` → `… else [y] * sql_double_op ( "PI()" )` (`functions.py`);
+   `MID([s], IIF(c,2,3), 2)` → `substr ( [s] , if … else 3 - 1 , 2 )`; `SIGN` / `INT` of an
+   IIF fail loudly.
+2. **A conditional as a right operand is never grouped:** `SUM([s]) < IIF(…)`, `[b] = IIF(…)`.
+   BL-060 live-confirmed that `sum(X) < if …` fails import. Whether `x + if … else …` parses as
+   intended is unprobed, and two tests pin that shape.
+3. **String concatenation:** `IIF([a]>1,'x','y') + 'z'` is now `( if … ) + 'z'`, which fails at
+   import (`+` is numeric only) rather than main's silently wrong `… else concat ( 'y' , 'z' )`.
+   The concat rewrite (`strings_types.py`) does not treat a group as an operand.
+4. **A right operand's missing ELSE gets `else 0`** (the converter's `ensure_else_clause`) while
+   `ts formula translate` gives `else null`: `IF [a]>1 THEN 1 END + IF [b] THEN 2 END` differs
+   from Tableau (NULL) on rows where the second condition is false.
+5. **A raw `IF … END` inside an `IIF` branch** (IIF converts first, so the inner block is still
+   unconverted when the IIF is grouped): `IIF([c], IF [a] THEN 2 END, 1) + 1` →
+   `( if ( [c] ) then if ( [a] ) then 2 else 1 else null ) + 1`, so the IIF's `else 1` binds to
+   the inner `if`. Wrong differently on main; `convert_if_then`'s uppercase-only `is_inner` is part
+   of the cause. An ELSEIF chain without ELSE inside an IIF does the same.
+6. **Sisense right operand:** `1 + IF(…)` and `[x] = IF(…)` stay bare, as item 2 for Tableau.
+7. Nits: a `CASE` containing `IF … END` is mis-bounded (`parsing.py::_find_matching_end` counts
+   CASE only); `… AND IIF([c],TRUE,FALSE) = FALSE` has its `) = false` rewritten to `= 0`.
+
+**Fix direction.** The durable fix is BL-440 (emit through a tree and printer instead of text
+rewrites); until then, apply the grouping as the last pass over the finished text, using block
+markers placed at conversion time.
+
+---
+
+## BL-650 — SQL translators: `NOT … BETWEEN` and `IN (SELECT …)` mistranslated `Tier 3`
+
+**Filed:** 2026-11-26. **Source:** as BL-649 (already wrong before BL-632). **Target:** 2027-01-31.
+
+**What.** In both SQL translators, `NOT COALESCE(a, 0) BETWEEN 0 AND 1` becomes
+`not ( x ) >= 0 and not ( x ) <= 1`: NOT binds to the operand, not to the predicate.
+`COALESCE(a, 0) IN (SELECT 1)` becomes `= [T::SELECT] 1`, reading the subquery as a column.
+Both mostly fail at import rather than silently.
+
+**Fix direction.** Apply `NOT` to the whole BETWEEN predicate, and refuse a subquery in `IN`
+with a reason.
+
+## BL-651 — ts-audit: four small defects from the 2026-11-27 SE demo cluster run `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** a full, read-only audit of the SE demo cluster's 150-Model
+sample on ts-cli 0.225.1, run to check #755, #757 and #762. The run was clean: no warnings,
+no hidden dependents, and the candidates export matched the 14 retire candidates. These four
+predate or sit beside that work. **Target:** 2027-01-31.
+
+**What.**
+
+1. **D8 names a different duplicate Table between runs.** It reports on "the first object's
+   guid", and the metadata search returns a duplicate pair in either order. Between the
+   2026-11-26 and 2026-11-27 runs, 3 of its 6 findings moved to the other Table of the pair
+   with nothing changed on the cluster. So run-to-run diffs show phantom removals and
+   additions, and a remediation keyed on the GUID targets a different Table each time.
+   Pick deterministically (i.e. the lowest GUID, or the oldest object), and test with the
+   pair in both orders.
+2. **The report never shows the audit's own date.** `corpus.audit_date` is hard-coded to `""`
+   (`tools/ts-cli/ts_cli/audit/__init__.py`), so the Dashboard's "Date:" item
+   (`report/views/dashboard.js`) never renders. The only date shown is the usage read date,
+   in UTC and unlabelled: a run at 08:29 on 2026-11-27 in Sydney reads 2026-11-26. Record
+   the run time, and label the zone of any date shown.
+3. **Usage view details.**
+   - The intro repeats "read" ("Usage of all Orgs, read from the Primary Org, read on …").
+   - Idle dots with exactly one dependent sit on the line between "check first" and
+     "retire candidates", beside the "retire candidates" label: coloured correctly, easy to
+     misread.
+   - The disabled "Not judged 0" chip still shows as pressed.
+4. **Owner email addresses reach the candidates file.** An owner's display name can be a
+   full email address, and it is copied into the CSV and JSON export. Say so in SKILL.md's
+   "Candidates file" section, since the file is meant to be shared with owners.
+
+## BL-652 — Child processes of the local test runs find a bare `python3` or `ts` by PATH, not by the chosen interpreter `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review of `fix/checks-python-on-path`.
+**Target:** 2027-01-31.
+
+That PR puts the chosen interpreter's directory first on PATH for the hook's and
+`pr-ready`'s pytest runs, which fixes the case it was raised for: `CHECKS_PYTHON` naming a
+virtual environment, whose `bin/` holds a `python3` that is the same interpreter. Two
+siblings remain:
+
+1. **An interpreter the search chose outside a venv** (no `CHECKS_PYTHON`, Homebrew's
+   `python3.12` with pytest) can sit beside a different `python3` (Homebrew's 3.15, no
+   pyyaml), or in a keg directory with no `python3` at all, so a child's bare `python3`
+   is still the wrong one. Fix: prepend a private temporary directory holding `python3` and
+   `python` wrapper scripts that `exec` the interpreter's absolute path (wrappers, not
+   symlinks, which lose the venv), with a test whose stub directory has a different
+   `python3`.
+2. **`pr-ready --full`'s smoke runs** (`run_checks.py:178`) keep the inherited PATH;
+   `smoke_ts_convert_from_dbt.py:40` and `smoke_ts_convert_to_dbt.py:48` start a bare `ts`,
+   which locally is whatever `ts` is first on PATH, not the venv's.
+
+## BL-653 — Headless-Chrome audit report tests fail intermittently under the full suite `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** two pre-commit runs of the full suite on
+`fix/checks-python-on-path`, each failing one different Chrome-rendering test.
+**Target:** 2026-12-18.
+
+**What.** Under the full suite (~14,000 tests, ~12 minutes), one headless-Chrome test in the
+`ts audit` report fails per run, a different one each time, and the same test passes on
+every rerun alone (3 of 3, and 31 of 31 for its file):
+
+- `tools/ts-cli/tests/test_audit_formula_tree.py::test_links_carry_an_awkward_guid_verbatim`
+  — "the page produced no probe output; DOM head: ''" (an empty DOM).
+- `tools/ts-cli/tests/test_audit_model_nav.py::test_the_routes_reports_already_link_to_still_work[formulas/m-1/graph-v-formulas-formulas, columns and parameters]`.
+
+**Why it matters.** A flaky gate costs a ~12-minute rerun of the hook per hit, and teaches
+people to reach for `--no-verify` (it did, once, on 2026-11-27). If CI hits it too, it
+blocks merges.
+
+**First step.** Find the shared mechanism (`report_browser`, the Chrome invocation: a
+fixed timeout, a shared profile or port, load from a busy machine) and make the wait
+deterministic rather than raising a timeout.
+
+**Update (2026-11-27): cause found, main case fixed.** With an everyday Chrome open, macOS
+runs each headless launch from a temporary "code-sign clone" of the app bundle, which
+Chrome creates and removes; now and then a launch lands in a clone whose framework is gone
+and dyld aborts it (`rc=-6`, empty stdout, `Library not loaded … code_sign_clone` on
+stderr). Reproduced with 8 parallel runs of the 15 Chrome test files under CPU load: 8
+failures, all this signature. `report_browser.render` now retries only that signature (up
+to 3 launches) and reports Chrome's exit code and stderr when it fails; the same stress
+run then gave 0 clone-race failures (4 launches recovered). The ERD tests' `browser.py` and
+the quest smoke `smoke_explore.py` launch Chrome through the same `run_chrome`, loaded by path,
+so every headless-Chrome test helper gets the retry. A hang now fails with Chrome's stderr tail
+instead of a bare `TimeoutExpired`. **Still open:** one render in
+about 3,500 hung to the 120 s timeout under that extreme load (8 suites plus 4 CPU
+burners), far beyond a normal hook or CI run. Not retried, since a retry on timeout would
+also hide a genuine hang; revisit if it is seen at normal load.
+
+## BL-654 — Test-suite time: pre-commit in parallel, a lighter matrix, heavy areas by path `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the pytest-xdist PR (CI's pytest lines run `-n auto`). **Target:** 2027-01-31.
+
+**What.** CI and `pr-ready --full` now run pytest on every CPU. Three further steps were
+measured or proposed and left out of that PR:
+
+1. **Pre-commit runs the unit suites serially** (`scripts/pre-commit.sh`, `run_pytest`), about
+   8.5 minutes on a commit that changes a `.py` file. Add `-n auto` when the hook's Python
+   can import `xdist`, and keep the serial run when it cannot, so a contributor without it
+   is not blocked.
+2. **The `pytest-matrix` job re-runs all ~14,000 tests on four more interpreters** and is
+   the slowest part of the required check. Run 3.10 and 3.14, the ends of
+   `requires-python`, on every PR, and 3.11 and 3.13 on pushes to `main` and weekly.
+3. **Skip heavy areas by path only after 1 and 2.** The ts-audit report's browser tests
+   (~180 s serial) and quest's browser test could run only when their own paths change,
+   with a full run on every push to `main` so a wrong skip shows the same day. Never a
+   "docs-only, skip pytest" rule: on 2026-11-26 a change to
+   `.github/pull_request_template.md` failed `test_repo_publisher.py`.
+
+**Done when.** Each of the three is built or declined with its reason here.
+
+## BL-655 — `test_worked_examples.py` breaks on pytest 10 `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the pytest-xdist PR's trial runs. **Target:** 2027-01-31.
+
+**What.** pytest 9.2 warns `PytestRemovedIn10Warning: Class-scoped fixtures defined as
+instance methods are deprecated` for the `example` fixture in
+`tools/ts-cli/tests/test_worked_examples.py`. CI installs `pytest` unpinned, so the day
+pytest 10 is released that file fails on every PR.
+
+**Fix direction.** Make the fixture a `@classmethod` setting attributes on `cls`, as the
+warning says; or pin pytest's major version in the workflow's installs (and `pr_ready.py`'s
+copies of them) and move it deliberately.
+
+## BL-656 — pytest-xdist PR: review leftovers `Tier 4`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review of `feat/pytest-parallel` (no
+Blockers; these were triaged out of the PR). **Target:** 2027-01-31.
+
+1. **`_NO_XDIST` in `tools/validate/pr_ready.py` matches anywhere in the output, at any exit
+   code.** A failing test that quotes pytest's usage line is reported as "pytest-xdist is not
+   installed". Require exit 4 and anchor to `^\S*pytest: error: unrecognized arguments:`;
+   the note header still says "tests skipped for a missing module" for that case.
+2. **The evidence's "Not reproduced locally" list omits the worker count** (local: one per
+   CPU; CI: 4).
+3. **`CHANGELOG.md` 2026-11-27 figures:** "about 2 minutes at 18 workers" is one point of a
+   spread (the main invocation took 107-187 s across three evidence runs; record the range),
+   and "needs `pytest-xdist==3.8.0`" (any xdist with `-n` works; 3.8.0 is CI's pin).
+4. **Four of five headless-Chrome call sites are untested** (main's code since #768):
+   `agents/cli/ts-object-model-erd/tests/browser.py` and the three launches in
+   `tools/quest/tests/smoke_explore.py` go through `run_chrome`, but only `render`'s call
+   site has a test, so one reverted to a bare `subprocess.run` would pass every test.
+
+The review's other Chrome-retry points (three `_dump_dom` copies, a retry condition broader
+than its docstrings, BL-653 not updated) were overtaken by #768, which
+merged first: one `run_chrome` in `report_browser.py` retrying only the code-sign-clone
+signature, used by every headless-Chrome helper. This PR took #768's version.
+
+**Done when.** Each is fixed or declined with its reason here.
+
+---
+
+## BL-657 — Table column `name` vs `db_column_name`: lint gate gap and merge-mode mis-binding `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review (`pr-reviewer` + `conversion-consistency-auditor`)
+of `fix/tableau-table-column-physical-names` (#767; ts-cli 0.225.4, ts-convert-from-tableau 1.47.2),
+which names Tableau Table TML columns by physical name, and the maintainer review of #767. Everything
+here was outside that PR's one purpose. **Target:** 2026-12-11 for item 2, 2026-12-15 for the rest.
+
+**Should-fix (a lint gate gap, and a silent wrong binding in merge mode).**
+
+1. **`ts tml lint --dir` passes the class of bug that PR fixed.** `_table_column_names`
+   (`ts_cli/commands/tml.py`) indexes both a Table column's `name` and its `db_column_name`, so a
+   Model `column_id` `TABLE::X` that matches only `db_column_name` reads as resolved, though import
+   resolves X against `name` only (error 14547). `test_lint_dir_renamed_column_resolves_via_db_column_name`
+   pins the wrong behaviour, and `table_aggregations` (`ts_cli/tml_lint.py`) rests on the same
+   premise. Fix: resolve against `name` only (or warn when only `db_column_name` matches), flip that
+   test, add one proving the failure is caught. Also correct the stale claims: lint called "the
+   model<->table name-alignment arbiter" in `tests/test_tableau_build_model_tables.py`, and 14547's
+   cause list in `agents/shared/schemas/ts-model-conversion-invariants.md` and `ts-tml-import-gate.md`.
+2. **Merge mode can silently rewrite a bare ref to the wrong column (pre-existing code, made reachable
+   by #767 — do this first).**
+   `build_col_table_map` / `build_column_lookup` (`ts_cli/model_builder.py`) put `column_id` suffixes
+   and display names into one upper-cased dict, so a display name (`Region` on one column) can
+   overwrite another column's physical suffix (`REGION`). Reproduced via
+   `prepare_formulas_for_merge`: `[REGION] = 'West'` came out bound to `BILLING_REGION`. Fires only
+   for refs still bare after translation. Before #767 a Model with a captioned column failed at
+   Phase 1, so Phase 2 never ran; now it imports and the standard Phase-2 formula step
+   (`build-model --existing-guid`) binds silently: a TWB with `[REGION]` captioned "Sales Region"
+   and then `[BILLING_REGION]` captioned "Region" rewrites `[REGION] = 'West'` to
+   `[Orders::BILLING_REGION] = 'West'`, which passes `filter_unresolvable_formulas` and imports. Needs
+   a column with no metadata-record and a caption equal (ignoring case) to another column's
+   physical name. Fix in its own PR: index every `column_id` suffix first, then add display names
+   with `setdefault`, in both functions, with that repro as a test.
+
+**Nits and warnings.**
+
+3. Duplicate Table column `name` is not guarded in the single-datasource path: two parse columns
+   resolving to one physical name (two captions over one `remote-name`, `_dbname` collapsing
+   `Order ID`/`Order_ID`, or a case-only pair `region`/`REGION`) emit duplicate names. Dedupe on
+   `db_name` first-seen-wins as the `table_registry` path does, or lint for duplicate `name`.
+4. `tableau/tables.py` still takes the name through the caption-keyed `cmap`
+   (`commands/tableau.py`): two datasources captioning different physical columns of one table the
+   same way emit the second physical name twice (loud; pre-existing). Name from the parse column's
+   `db_column_name`, or key `cmap` by it.
+5. The new test checks `column_id` suffixes only; add a two-table fixture with a join and a formula
+   on a captioned column so join `on:` and `[TABLE::X]` formula refs are pinned too.
+6. Upgrade note (the skill line and coverage-matrix row 140 landed in #767): still open is whether
+   re-importing a regenerated Table over its GUID renames its columns and what that does to
+   Answers and Liveboards on it. Not live-verified.
+7. The formula translator builds `[TABLE::X]` from the Tableau local name, not `db_column_name`
+   (`strings_types.py`, `col_table_map` keyed by local name). A column whose local name differs
+   from its remote name (`[REGION1]` over `REGION`, no caption) gives `[T1::REGION1]`, which
+   matches no Table column; lint does not parse formula bodies, so it passes and the formula
+   fails at import. Loud, but build X from `db_column_name` there too.
+8. Wording: `tableau/tables.py`'s module docstring still says it mirrors PowerBI's shape and speaks
+   of a display name (Power BI keeps display names on Table columns); the `_write_table_tml_files`
+   docstring says the cmap sets `db_column_name` only; rename
+   `test_build_table_tml_table_map_and_column_map_override_physical_names_only`.
+9. The name-collision drop (`formula_common.py`) removes a physical column whose caption equals a
+   formula's name, and Table TML is written from the cleaned columns, so the column disappears
+   from the Table too (a join on it dangles; lint catches it). Under the Table-is-physical rule
+   the Table should keep every physical column (pre-existing).
+
+---
+
+## BL-658 — ts-convert-from-sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks `Tier 2`
+
+**Filed:** 2026-11-19. **Source:** PR #672 review, round 6 (should-fix 4).
+**Target:** 2027-01-31.
+
+**What.** Five modules each check part of a tile's join path: `target_paths.path_problem`,
+`target_paths.loop_problem` / `sisense_closure`, `target_model.role_conflict`,
+`target_chips._reach_problem` / `_copy_problem`, and `target_answers._Binder.no_fact_problem`.
+Each chip is checked against a tile alone, with one combined pass on top
+(`target_chips._tree_rows`, for multi-fact queries and loops only). Today every chip with a
+condition flags its tiles anyway, through the range-chip open item (#5) or the value-matching
+row (#8). That hides the cases the per-chip checks still see one at a time; once #5 and #8 are
+verified, those cases will surface.
+
+**Do.** Build each tile's whole join tree once, on both sides: the Model's tree from its facts to
+every instance its columns, filters and chips read, and Sisense's tree from its fact tables (or
+its one linking table) over the relations. Compare the two trees hop for hop. Then retire the
+per-case checks it subsumes, keeping their tests as regression cases. Land it before #5 or #8 is
+closed.
+
+---
+
+## BL-659 — Sisense `--target-model`: round-6 review leftovers `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the maintainer's round-6 re-review of PR #672 (head `331849dd`),
+which found no blocker. **Target:** 2027-01-31.
+
+1. **`isBetween` and `isCondition` are accepted with any value** (`sisense/parsing.py`, the
+   `_EXPLICIT_OK` rule covers `explicit` only). `{"from":1,"to":10,"isBetween":false}` on a key
+   comes back Migrated as `>= 1 <= 10`. Same class as round 3's `explicit` point: accept only
+   `true` or absent. Not shown to change meaning in Sisense today.
+2. **A `field_map` onto an instance the widget's facts cannot reach skips the path check**
+   (`target_answers._path_problem` checks only anchors that reach the instance). With the PR's
+   fixture, `Cost by status` with `[fact_visit.cost]` → `Case Visit Total` is Migrated with no
+   note. Masked in practice: once the Sisense tables name their warehouse tables, the physical
+   check flags it. Refuse an unreachable instance as `resolve_instance` does for native bindings,
+   and soften the "the whole join path" claim in the coverage matrix until then.
+3. **Two gaps that matter only when a JAQL item has no `datatype`.** The date-measure-with-no-level
+   flag needs `datatype: datetime`, and `_same_measure` (`target_filters.py`) ignores `by.level`,
+   so a ranking by a count of months can be carried as a count of days. Widgets built in the
+   Sisense UI carry `datatype`.
+4. `_unmappable` refuses every unknown-kind filter (`contains`, …) even when keyed; a keyed entry
+   would be safe for those kinds. Possible relaxation.

@@ -1017,7 +1017,11 @@ mkdir -p /tmp/ts_tableau_mig/output/{workbook_name}
 > **Scope gate:** runs for scopes 1, 2, 5. **Skip for scope 3** (LB only — no tables)
 > and **scope 4** (Models only — tables already exist; use GUIDs from Step 4).
 
-> **Prerequisite:** ts-cli v0.77.0+.
+> **Prerequisite:** ts-cli v0.77.0+; v0.225.4+ names each Table column by its physical
+> name (`name` = `db_column_name`), which the Model's `column_id` needs.
+> **Tables imported by ts-cli v0.225.3 or earlier** are named by Tableau caption, so a scope-4
+> run or a Phase-2 merge over them still fails on every captioned column: regenerate and
+> re-import those Tables first.
 
 `ts tableau build-model` (GENERATE mode, no `--existing-guid`) emits Table TML
 automatically — **no hand-assembly**. **Run it ONCE for the whole workbook** (below) — the
@@ -1050,7 +1054,8 @@ default per-datasource loop; `--model-name "{name}"` overrides the derived model
 
 Follow all rules in `tableau-tml-rules.md` when reviewing the emitted file — in
 particular **db_column_name accuracy** (a warehouse loader can normalize names
-differently than the TWB), **date-stored-as-VARCHAR** detection, and the
+differently than the TWB; correct `db_column_name` only, never the column's `name`,
+which the Model's `column_id` resolves against), **date-stored-as-VARCHAR** detection, and the
 **partial-date-string** pattern (`tableau-tml-rules.md` "Date Column Rules"):
 `build-model` carries over the TWB's own type/name metadata and has no live-schema
 visibility, so these are still worth a human check before import. Validation
@@ -2507,6 +2512,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.47.0 | 2026-11-19 | Model/formula-engine fixes (ts-cli v0.220.1). Nested-`group_aggregate` false-flag fixed; a nested FIXED LOD parks, not migrates. `convert_string_concat` no longer concats a numeric `+` just because the formula is string-typed; a rejected pair no longer shares a conversion's budget, so long ladders convert fully. `to_string`/`str` drops only for a whole `concat()` argument; its masking token is control-character-delimited. `fix_double_aggregation` follows refs at any depth, adds `median`/`min_if`/`max_if`/`stddev_if`/`variance_if`, uses a quote-aware paren matcher; strips `sum()` only when some aggregate sits outside every `group_aggregate`. Import-retry no longer fails open; merge prints every datasource's result — BL-580/581/582/612. |
+| 1.47.2 | 2026-11-27 | Table TML columns are named by physical name, so a captioned column's `column_id` resolves at import (ts-cli v0.225.4). Tables imported by an earlier ts-cli keep caption names: regenerate them before scope 4 or a Phase-2 merge. |
 
-**Older entries (v1.0.0–v1.46.3):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.47.1):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
