@@ -574,6 +574,7 @@ are roughly ordered by value÷effort.
 | BL-643 | from-databricks-mv: offer one combined Model when several MVs were split only by the chasm trap (parked 2026-11-26) | user request to resume |
 | BL-656 | pytest-xdist PR review leftovers: `_NO_XDIST` match, worker count in evidence, CHANGELOG figures, untested Chrome call sites | 2027-01-31 |
 | BL-660 | Tableau: `[Date] = {FIXED : MAX([Date])}` emits the row-vs-whole-table `group_aggregate` comparison BL-638 found wrong | 2027-01-31 |
+| BL-662 | MV/SV cast and naming leftovers from PR #771: `to_date` over other date-valued inputs, the Snowflake siblings, a date literal compared with text, `.title()` on digits | 2027-01-31 |
 
 ---
 
@@ -19196,7 +19197,7 @@ surface `dropped` instead of discarding it.
 
 ## BL-631 — from-databricks-mv: `display_title` title-cases names that have no display_name, mangling acronyms `Tier 3`
 
-**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.226.2: only a snake_case or all-lower-case `name` is title-cased; any other is used as written). **Source:** as BL-629. **Target:** 2027-01-31.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.226.2: a `name` cased by its author is used as written; snake_case, all-lower and all-upper names are title-cased. Python's `.title()` still turns `order_2nd_qtr` into `Order 2Nd Qtr`: BL-662). **Source:** as BL-629. **Target:** 2027-01-31.
 
 **What.** `display_title` (`tools/ts-cli/ts_cli/databricks/mv_translate.py:76-78`) returns
 `entry["name"].replace("_", " ").title()` when there is no `display_name`. That is right for
@@ -19256,7 +19257,7 @@ Models to re-convert: any with a `COALESCE` followed by an operator.
 
 ## BL-633 — `CAST(col AS STRING)` is dropped, including inside a pass-through such as `TO_DATE` `Tier 3`
 
-**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.226.2: a cast to text is `sql_string_op ( "CAST({0} AS STRING)" , x )`, or `to_string` over an aggregate. Live: Databricks also accepts `to_date(<int>, fmt)`, so the dropped cast inside `to_date` had returned the right value; the risk was `concat` and string comparisons). **Source:** as BL-629. **Target:** 2027-01-31.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.226.2: a cast to text over a column is `sql_string_op ( "CAST({0} AS STRING)" , [T::x] )`, over `SUM`/`COUNT`/`AVG` `to_string`, over another expression skipped. Live: Databricks also accepts `to_date(<int>, fmt)`, so the dropped cast inside `to_date` had returned the right value; the risk was `concat` and string comparisons). **Source:** as BL-629. **Target:** 2027-01-31.
 
 **What.** `TO_DATE(CAST(fact.DATE_KEY AS STRING), 'yyyyMMdd')`, the usual way to turn an
 integer `yyyyMMdd` key into a date, translates to
@@ -20021,3 +20022,35 @@ and was not re-probed.
 **Done when.** A live probe on a two-table fixture confirms or refutes the defect for the
 Tableau form; if confirmed, the converter emits a faithful form (a subquery needs the
 source table's FQN, which a Tableau datasource may not give) or skips with the reason.
+
+---
+
+## BL-662 — Cast and naming leftovers from the PR #771 review `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** review of PR #771 (BL-631, BL-633). **Target:** 2027-01-31.
+
+All predate #771; it fixed the cases it was about and recorded these.
+
+1. **`to_date` over other date-valued inputs.** ThoughtSpot rejected `to_date ( start_of_month ( … ) )`
+   at import (live 2026-11-27), so #771 drops `CAST(… AS DATE)` over a translated `start_of_*` or
+   `to_date`. These still emit `to_date ( <date-valued> )`: `CAST(DATE_TRUNC('MONTH', ts) AS TIMESTAMP)`
+   (via `"TIMESTAMP": "to_date"` in `formula_common.py`), `CAST(TO_DATE(s, fmt) AS DATE)` (a
+   `sql_date_op`), `CAST(DATE_TRUNC('DAY', ts) AS DATE)` and `CAST(DATE(ts) AS DATE)` (`date ( … )`),
+   `CAST(d AS DATE)` on a DATE column, `CAST(DATE_ADD(d, 1) AS DATE)`, `CAST(MAX(d) AS DATE)`,
+   `CAST(CURRENT_DATE() AS DATE)`. Whether each is rejected is inferred from the one live rejection.
+   Candidate: `date ( x )`, which the schema records as compiling to nothing on a DATE and to
+   `CAST(… AS date)` on a datetime (`thoughtspot-formula-patterns.md`). Probe live first.
+2. **Snowflake siblings.** `sv_naming.py` title-cases every name (BL-631's problem); `sv_sql.py` emits
+   `to_date ( start_of_month ( … ) )` for `CAST(DATE_TRUNC('MONTH', d) AS DATE)`, and `to_string` over
+   any input for a cast to text.
+3. **A date literal compared with text.** `CAST(d AS STRING) = '2026-11-01'` gives
+   `sql_string_op ( … ) = to_date ( '2026-11-01' , … )`: the translator rewrites every date-shaped
+   literal as a date whatever its context (`mv_sql.py`). Rare; unverified whether ThoughtSpot rejects it.
+4. **`.title()` on digits and some letters.** `order_2nd_qtr` → `Order 2Nd Qtr`, `revenue_ytd` →
+   `Revenue Ytd`, `ß_total` → `Ss Total` (`mv_translate.display_title`).
+5. **Aggregate detection through `MEASURE()`.** `_row_level_only` (`mv_sql.py`) and the BIGINT/DECIMAL
+   casts check `expr_is_aggregated` on the inner text, which is still a `__MVREF_n__` placeholder for
+   `MEASURE(m)`: `BROUND(MEASURE(revenue), 2)` passes where `BROUND(SUM(x), 2)` is refused.
+   `sqlf_resolver_is_aggregated` (`sql_forms.py`) answers it. (#771's cast to text refuses it.)
+
+**Done when.** Each item is fixed with a test, or recorded here as declined with its reason.

@@ -82,11 +82,13 @@ def display_title(entry: dict) -> str:
     if entry.get("display_name"):
         return entry["display_name"]
     name = str(entry["name"])
-    # BL-631: title-case only a snake_case identifier; a name already written for
-    # people (`SKU Type`, `Is eBook`, `CustomerName`) is used as written.
-    if " " not in name and ("_" in name or name == name.lower()):
-        return name.replace("_", " ").title()
-    return name
+    # BL-631: a name cased by its author — upper and lower case letters, no
+    # underscore (`SKU Type`, `Is eBook`, `CustomerName`) — is used as written; a
+    # snake_case, all-lower or all-upper name is title-cased (`order_month`,
+    # `net sales`, `REVENUE`).
+    if "_" not in name and name != name.lower() and name != name.upper():
+        return name
+    return name.replace("_", " ").title()
 
 
 _SCALAR_RE = re.compile(r"^__MVSCALAR_(\d+)__$")

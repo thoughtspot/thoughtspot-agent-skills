@@ -185,7 +185,7 @@ def _construct_cast(cur, resolver) -> str:
         return special
     if type_name in _CAST_TEXT:
         return _cast_to_text(type_name, params, inner)
-    if type_name == "DATE" and _DATE_VALUED_RE.match(inner):
+    if type_name == "DATE" and _DATE_VALUED_RE.match(_strip_outer_parens(inner)):
         # Already a date with no time part; ThoughtSpot rejects to_date over it
         # ("Search did not find start_of_month (", live 2026-11-27).
         return inner
@@ -209,16 +209,42 @@ _CAST_TEXT = frozenset({"STRING", "VARCHAR", "TEXT", "CHAR"})
 #: ThoughtSpot functions that return a DATE (no time part): CAST(<one> AS DATE) is a no-op.
 _DATE_VALUED_RE = re.compile(
     r"^(start_of_(week|month|quarter|year)|to_date) \(")
+#: A physical column: the warehouse casts the source's own value, so the text is exact.
+_COLUMN_REF_RE = re.compile(r"^\[[^\[\]]+::[^\[\]]+\]$")
+#: Numeric aggregates: to_string takes a number (it rejects Text and a one-argument DATE).
+_NUMERIC_AGG_RE = re.compile(r"^(sum|count|average|unique count) \(")
+
+
+def _strip_outer_parens(s: str) -> str:
+    while s.startswith("( ") and s.endswith(" )"):
+        depth = 0
+        for i, ch in enumerate(s):
+            depth += {"(": 1, ")": -1}.get(ch, 0)
+            if depth == 0 and i < len(s) - 1:
+                return s
+        s = s[2:-2]
+    return s
 
 
 def _cast_to_text(type_name: str, params: list[str], inner: str) -> str:
-    """Row level, the warehouse's own cast (any input type); over an aggregate, which a
-    sql_*_op cannot wrap, ThoughtSpot's to_string (a numeric aggregate)."""
-    from ts_cli.formula_common import expr_is_aggregated
-    if expr_is_aggregated(inner):
-        return f"to_string ( {inner} )"
-    target = type_name + (f"({','.join(params)})" if params else "")
-    return f'sql_string_op ( "CAST({{0}} AS {target})" , {inner} )'
+    """BL-633, bounded to the forms that are exact by construction: a literal or NULL
+    unchanged; a physical column through the warehouse's own cast; a numeric aggregate
+    through to_string. Anything else is refused: its text depends on the warehouse type
+    ThoughtSpot's translation produces (`start_of_month` may be a TIMESTAMP where the
+    source's `TRUNC` is a DATE), and a MIN/MAX or MEASURE() may be text or a date."""
+    from ts_cli.databricks.mv_sql import UntranslatableError
+    bare = _strip_outer_parens(inner)
+    if bare == "null" or bare.startswith(("'", '"')):
+        return inner
+    if _COLUMN_REF_RE.match(bare):
+        target = type_name + (f"({','.join(params)})" if params else "")
+        return f'sql_string_op ( "CAST({{0}} AS {target})" , {bare} )'
+    if _NUMERIC_AGG_RE.match(bare):
+        return f"to_string ( {bare} )"
+    raise UntranslatableError(
+        f"CAST(... AS {type_name}) over an expression: its text depends on the "
+        f"expression's warehouse type, which ThoughtSpot's translation may change "
+        f"(only a column, a literal or a SUM/COUNT/AVG is translated)")
 
 
 def _cast_params(cur) -> list[str]:

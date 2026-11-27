@@ -52,3 +52,61 @@ def test_numeric_widening_is_still_a_no_op():
 ])
 def test_cast_to_date(sql, ts):
     assert translate_sql_expr(sql, R) == ts
+
+
+# --- review round 1 (PR #771) ----------------------------------------------------
+@pytest.mark.parametrize("name,title", [
+    ("order month", "Order Month"),
+    ("REVENUE", "Revenue"),
+    ("net sales", "Net Sales"),
+])
+def test_lower_and_upper_names_are_title_cased(name, title):
+    assert display_title({"name": name}) == title
+
+
+@pytest.mark.parametrize("sql", [
+    "CAST(DATE_TRUNC('MONTH', source.D) AS STRING)",   # TS start_of_month may be a TIMESTAMP
+    "CAST(TRUNC(source.D, 'MM') AS STRING)",
+    "CAST(MIN(source.S) AS STRING)",                   # text or date aggregate
+    "CAST(MAX(source.D) AS STRING)",
+    "CAST(CONCAT('max(', source.S) AS STRING)",
+])
+def test_cast_to_text_over_an_expression_is_refused(sql):
+    from ts_cli.databricks.mv_sql import UntranslatableError
+    with pytest.raises(UntranslatableError, match="warehouse type"):
+        translate_sql_expr(sql, R)
+
+
+@pytest.mark.parametrize("sql,ts", [
+    ("CAST(NULL AS STRING)", "null"),
+    ("CAST('abc' AS STRING)", "'abc'"),
+    ("CAST(COUNT(source.K) AS STRING)", "to_string ( count ( [FACT::K] ) )"),
+    ("CAST((DATE_TRUNC('MONTH', source.D)) AS DATE)", "( start_of_month ( [FACT::D] ) )"),
+])
+def test_cast_forms_left_alone_or_exact(sql, ts):
+    assert translate_sql_expr(sql, R) == ts
+
+
+def test_measure_ref_cast_to_text_is_refused():
+    from ts_cli.databricks.mv_parse import parse_metric_view
+    from ts_cli.databricks.mv_translate import translate_metric_view
+    mv = """
+version: 1.1
+source: cat.sch.fact
+dimensions:
+  - name: k
+    expr: source.K
+measures:
+  - name: revenue
+    expr: SUM(source.AMOUNT)
+  - name: revenue_text
+    expr: CAST(MEASURE(revenue) AS STRING)
+"""
+    out = translate_metric_view(parse_metric_view(mv), {"source": "FACT"})
+    assert "revenue_text" in {s["name"] for s in out["skipped"]}
+
+
+def test_titles_differing_only_by_case_fail_loud():
+    from ts_cli.databricks.mv_build_model import _check_no_duplicate_display_names
+    with pytest.raises(ValueError, match="duplicate display title"):
+        _check_no_duplicate_display_names([{"name": "SKU Type"}, {"name": "Sku Type"}])
