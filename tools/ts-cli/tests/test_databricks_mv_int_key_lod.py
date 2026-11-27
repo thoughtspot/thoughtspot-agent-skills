@@ -95,3 +95,82 @@ class TestWholeTableLod:
     def test_partitioned_lod_unchanged(self):
         c = classify_dimension_expr("SUM(source.x) OVER (PARTITION BY source.r)")
         assert c["partition_by"] == ["source.r"]
+
+
+# --- BL-638: a row compared to a whole-table OVER () dimension -------------------
+from ts_cli.databricks.mv_parse import parse_metric_view  # noqa: E402
+from ts_cli.databricks.mv_translate import translate_metric_view  # noqa: E402
+
+MV = """
+version: 1.1
+source: cat.sch.fact
+filter: coalesce(source.IS_DELETED, false) = false
+dimensions:
+  - name: record_month
+    expr: "TO_DATE(CAST(source.DATE_KEY AS STRING), 'yyyyMMdd')"
+    display_name: Month
+  - name: latest_month
+    expr: "MAX(TO_DATE(CAST(source.DATE_KEY AS STRING), 'yyyyMMdd')) OVER ()"
+    display_name: Latest Data Month
+  - name: is_mtd
+    expr: {flag}
+measures:
+  - name: Opening
+    expr: SUM(source.BAL)
+    window: [{{order: record_month, semiadditive: first, range: current}}]
+  - name: Closed MTD
+    expr: SUM(source.BAL) FILTER (WHERE record_month = latest_month)
+"""
+
+
+def _run(flag="record_month = latest_month", mv=MV):
+    parsed = parse_metric_view(mv.format(flag=flag))
+    return translate_metric_view(parsed, {"source": "FACT", "d": "DIM"})
+
+
+def _by(out, name):
+    return next(e for e in out["translated"] if e["name"] == name)
+
+
+class TestLatestPeriodFlag:
+    def test_flag_becomes_a_scalar_subquery(self):
+        out = _run()
+        flag = _by(out, "is_mtd")
+        assert flag["ts_expr"] == (
+            'sql_bool_op ( "{0} = (SELECT MAX(TO_DATE(CAST(DATE_KEY AS STRING), '
+            "'yyyyMMdd')) FROM cat.sch.fact WHERE coalesce(IS_DELETED, false) = false)\" , "
+            "[formula_Month] )")
+        assert flag["annotations"][0]["kind"] == "subquery_passthrough"
+
+    def test_latest_dimension_itself_is_whole_table(self):
+        assert _by(_run(), "latest_month")["ts_expr"].endswith(", { } , { } )")
+
+    def test_reversed_operands_keep_the_order(self):
+        flag = _by(_run("latest_month > record_month"), "is_mtd")
+        assert flag["ts_expr"].startswith('sql_bool_op ( "(SELECT MAX(')
+        assert ') > {0}" , [formula_Month] )' in flag["ts_expr"]
+
+    def test_window_order_uses_the_int_key(self):
+        assert _by(_run(), "Opening")["ts_expr"].endswith("{ [FACT::DATE_KEY] } )")
+
+    def test_measure_referencing_it_is_flagged_for_verification(self):
+        notes = [a["kind"] for a in _by(_run(), "Closed MTD")["annotations"]]
+        assert "pending_verification" in notes
+
+    @pytest.mark.parametrize("flag", [
+        "record_month = latest_month AND source.BAL > 0",
+        "DATEDIFF(record_month, latest_month)",
+        "latest_month = latest_month",
+    ])
+    def test_other_shapes_are_skipped_not_emitted(self, flag):
+        out = _run(flag)
+        skip = next(s for s in out["skipped"] if s["name"] == "is_mtd")
+        assert "BL-638" in skip["reason"]
+
+    def test_joined_column_in_the_latest_dimension_is_skipped(self):
+        mv = MV.replace("MAX(TO_DATE(CAST(source.DATE_KEY AS STRING), 'yyyyMMdd')) OVER ()",
+                        "MAX(d.MONTH_START) OVER ()").replace(
+            "filter:", "joins:\n  - name: d\n    source: cat.sch.dim\n    on: source.K = d.K\nfilter:")
+        out = _run(mv=mv)
+        skip = next(s for s in out["skipped"] if s["name"] == "is_mtd")
+        assert "BL-638" in skip["reason"] and "source column" in skip["reason"]

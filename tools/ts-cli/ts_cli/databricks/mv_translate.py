@@ -27,6 +27,8 @@ from ts_cli.databricks.mv_expr import (
     split_dot_path,
     strip_sql_comments,
 )
+from ts_cli.databricks.mv_latest_period import (
+    PASSTHROUGH_NOTE, references, translate_latest_period_flag, whole_table_lods)
 from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
 from ts_cli.sql_forms import sqlf_aggregate_window_values
 from ts_cli.formula_week import week_start_note
@@ -460,6 +462,42 @@ def translate_metric_view(parsed: dict, tables: dict, *,
         _DIM_REFS.reset(token)
 
 
+def _translate_dimension_in_mv(dim: dict, parsed: dict, tables: dict,
+                               lods: dict[str, dict]) -> dict:
+    """translate_dimension, except a flag comparing a row to an earlier whole-table
+    OVER () dimension, which becomes a scalar subquery (BL-638)."""
+    if dim["kind"] == "computed":
+        named = [n for n in references(dim["expr"], lods) if n in _DIM_REFS.get()]
+        if named:
+            resolver = make_resolver(tables)
+            ts = translate_latest_period_flag(
+                dim, parsed, lods, lambda e: translate_sql_expr(e, resolver))
+            return _entry(dim["name"], "dimension", "formula", "ATTRIBUTE", dim,
+                          ts_expr=ts, annotations=[{"kind": "subquery_passthrough",
+                                                    "detail": PASSTHROUGH_NOTE.format(
+                                                        lod=lods[named[0]]["name"])}])
+    return translate_dimension(dim, tables)
+
+
+_LOD_IN_MEASURE_NOTE = (
+    "references the whole-table '{lod}' ({ref}). A row compared to it in a "
+    "dimension gives wrong numbers in ThoughtSpot (BL-638); inside a measure this is "
+    "unverified, so check its numbers against the Metric View.")
+
+
+def _flag_measures_on_whole_table_lods(translated: list[dict], lods: dict[str, dict],
+                                       visible: dict[str, str]) -> None:
+    refs = {visible[n]: lods[n]["name"] for n in lods if n in visible}
+    for entry in translated:
+        if entry.get("role") != "measure":
+            continue
+        for ref, name in refs.items():
+            if ref in (entry.get("ts_expr") or ""):
+                entry["annotations"].append({"kind": "pending_verification",
+                                             "detail": _LOD_IN_MEASURE_NOTE.format(
+                                                 lod=name, ref=ref)})
+
+
 def _translate_metric_view(parsed: dict, tables: dict, allow_row_lag: bool) -> dict:
     translated: list[dict] = []
     skipped: list[dict] = []
@@ -469,8 +507,9 @@ def _translate_metric_view(parsed: dict, tables: dict, allow_row_lag: bool) -> d
     window_measures: list[str] = []
 
     visible = _DIM_REFS.get()  # the dict set for this run, filled in place
+    lods = whole_table_lods(parsed)
     for dim in parsed["dimensions"]:
-        _translate_item(lambda: translate_dimension(dim, tables),
+        _translate_item(lambda: _translate_dimension_in_mv(dim, parsed, tables, lods),
                         dim["name"], "dimension",
                         translated, skipped, by_name, skip_names)
         if dim["name"] in by_name and dim["name"] not in skip_names:
@@ -507,6 +546,7 @@ def _translate_metric_view(parsed: dict, tables: dict, allow_row_lag: bool) -> d
     _translate_cross_measures(deferred, parsed, tables, translated, skipped,
                               by_name, skip_names, window_measures, allow_row_lag)
 
+    _flag_measures_on_whole_table_lods(translated, lods, visible)
     filter_out = None
     total = len(parsed["dimensions"]) + len(parsed["measures"])
     if parsed["filter"] is not None:
