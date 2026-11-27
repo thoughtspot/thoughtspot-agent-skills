@@ -105,13 +105,9 @@ def _source_sql(sql: str, what: str) -> str:
     return "".join(out).strip()
 
 
-def translate_latest_period_flag(dim: dict, parsed: dict, lods: dict[str, dict],
-                                 operand_ts) -> str:
-    """The sql_bool_op formula for `dim`, or UntranslatableError (the skip reason
-    says why). operand_ts translates the non-LOD side to a ThoughtSpot expression."""
-    why = (f"dimension '{dim['name']}' compares to a whole-table OVER () dimension; "
-           f"the group_aggregate comparison gives wrong numbers in ThoughtSpot (BL-638) "
-           f"and it")
+def _sides(dim: dict, lods: dict[str, dict], why: str) -> tuple[str, str, str, bool]:
+    """(op, the other operand, the latest dimension's casefolded name, whether the
+    latest dimension is on the right)."""
     try:
         left, op, right = _split_comparison(dim["expr"])
     except UntranslatableError:
@@ -120,11 +116,15 @@ def translate_latest_period_flag(dim: dict, parsed: dict, lods: dict[str, dict],
             f"one shape emitted as a subquery") from None
     side = [s for s in (left, right)
             if len(split_dot_path(s)) == 1 and _unquote(s).casefold() in lods]
-    other = right if side and side[0] == left else left
+    on_right = bool(side) and side[0] == right
+    other = left if on_right else right
     if len(side) != 1 or references(other, lods):
         raise UntranslatableError(
             f"{why} does not compare one plain expression to one latest dimension")
-    lod = lods[_unquote(side[0]).casefold()]
+    return op, other, _unquote(side[0]).casefold(), on_right
+
+
+def _subquery(lod: dict, parsed: dict, why: str) -> str:
     if lod["inner_agg"] not in _SQL_AGGS:
         raise UntranslatableError(
             f"{why} uses {lod['inner_agg']}, and only MAX/MIN latest dimensions are "
@@ -141,5 +141,17 @@ def translate_latest_period_flag(dim: dict, parsed: dict, lods: dict[str, dict],
         raise UntranslatableError(f"{why} cannot be a subquery: {exc}") from None
     if any(c in sql for c in '"{}'):
         raise UntranslatableError(f"{why} has a double quote or brace in its SQL")
-    lhs, rhs = ("{0}", f"({sql})") if side[0] == right else (f"({sql})", "{0}")
+    return sql
+
+
+def translate_latest_period_flag(dim: dict, parsed: dict, lods: dict[str, dict],
+                                 operand_ts) -> str:
+    """The sql_bool_op formula for `dim`, or UntranslatableError (the skip reason
+    says why). operand_ts translates the non-LOD side to a ThoughtSpot expression."""
+    why = (f"dimension '{dim['name']}' compares to a whole-table OVER () dimension; "
+           f"the group_aggregate comparison gives wrong numbers in ThoughtSpot (BL-638) "
+           f"and it")
+    op, other, name, on_right = _sides(dim, lods, why)
+    sql = _subquery(lods[name], parsed, why)
+    lhs, rhs = ("{0}", f"({sql})") if on_right else (f"({sql})", "{0}")
     return f'sql_bool_op ( "{lhs} {op} {rhs}" , {operand_ts(other)} )'
