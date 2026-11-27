@@ -127,7 +127,7 @@ def translate_window_measure(measure: dict, dimensions: list[dict],
             "the YAML) — build group_aggregate ( sum ( [m] ) , { dims } , "
             "query_filters ( ) ) manually per ts-from-databricks-rules.md "
             "All-Partition Window")
-    order = _find_order_dim(window["order"], dimensions, tables)
+    order = _order_dim_by_source_columns(window["order"], dimensions, tables)
     if order.get("formula_title") and rng["type"] != "current":
         raise UntranslatableError(
             f"range '{window['raw_range']}' over the derived order dimension "
@@ -176,6 +176,13 @@ def translate_window_measure(measure: dict, dimensions: list[dict],
                             _ORDER_BY_FORMULA.format(title=order["formula_title"],
                                                      order=window["order"])})
     annotations.extend(scalar_annotations(measure, in_window=True))
+    # A semi-additive measure over several aggregates (`SUM(a) - SUM(b)`, range:
+    # current) gives arithmetic over first_value / last_value calls, which
+    # ThoughtSpot rejects at import; aggregate them as cross-measure inlining does
+    # (BL-637, review of the first fix).
+    from ts_cli.sql_forms import sqlf_aggregate_window_values
+    if ts.count("first_value (") + ts.count("last_value (") >= 2:
+        ts = sqlf_aggregate_window_values(ts)  # only the probed multi-call shape
     return _formula_measure(measure, ts, annotations=_dedupe(annotations))
 
 
@@ -187,6 +194,21 @@ def _dedupe(annotations: list[dict]) -> list[dict]:
             seen.add(key)
             out.append(a)
     return out
+
+
+def _order_dim_by_source_columns(order_name: str, dimensions: list[dict],
+                                 tables: dict) -> dict:
+    """_find_order_dim with dimension references switched off: the order dimension's
+    own expression is resolved as before BL-629, against source columns, which is the
+    live-verified window shape (review of the first BL-629 fix: resolving it
+    through the dimension map re-routed a self-named order dimension to its own
+    formula and bypassed the formula-ordered guard)."""
+    from ts_cli.databricks.mv_translate import _DIM_REFS
+    token = _DIM_REFS.set({})
+    try:
+        return _find_order_dim(order_name, dimensions, tables)
+    finally:
+        _DIM_REFS.reset(token)
 
 
 def _find_order_dim(order_name: str, dimensions: list[dict],
