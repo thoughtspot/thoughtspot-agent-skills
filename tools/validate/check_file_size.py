@@ -63,7 +63,7 @@ RATCHET: dict[str, tuple[int, str]] = {
     # instead of exiting the process directly, so a failed export on one
     # datasource no longer kills the per-datasource loop before every other
     # datasource's result is printed (round-4 PR #662 review).
-    # 1625 as of ts-cli v0.227.0: --warehouse-columns is plumbed through
+    # 1625 as of ts-cli v0.228.0: --warehouse-columns is plumbed through
     # build-model's per-datasource flow (option, load, and the bound-suffix set
     # passed to translate/validate/generate); its logic lives in
     # tableau/build_model.py, only the wiring is here.

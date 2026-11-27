@@ -168,7 +168,8 @@ def _add_formula(ctx, name, dax, kind, home_table=None, home_cols=None):
         note = ov.get("note", "from overrides")
     else:
         expr, status, note = translate_dax(dax, home_table, home_cols,
-                                           ctx["date_cols"], ctx["measure_dax"], ctx["physical_cols"])
+                                           ctx["date_cols"], ctx["measure_dax"], ctx["physical_cols"],
+                                           is_measure=(kind == "measure"))
     if expr and any(f"[{d}]" in expr for d in ctx["dropped_ids"]):
         expr, status = None, "NEEDS REVIEW"
         note = (note + "; " if note else "") + "references a column with no physical match (dropped)"

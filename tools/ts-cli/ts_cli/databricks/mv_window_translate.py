@@ -30,6 +30,12 @@ _DATE_TRUNC_DIM_RE = re.compile(
     r"^DATE_TRUNC\s*\(\s*'(\w+)'\s*,\s*(.+?)\s*\)\s*$", re.IGNORECASE | re.DOTALL)
 _PLAIN_COLUMN_RE = re.compile(
     r"^(?:`[^`]+`|[A-Za-z_][\w$]*)(?:\.(?:`[^`]+`|[A-Za-z_][\w$]*))*$")
+# BL-634: a date built from an integer key, TO_DATE(CAST(key AS STRING), 'yyyyMMdd').
+# A digits-only, most-significant-first format sorts the integer exactly as the
+# date, so the window is ordered by the key column itself.
+_INT_KEY_DATE_RE = re.compile(
+    r"^(?i:TO_DATE)\s*\(\s*(?i:CAST)\s*\(\s*(.+?)\s+(?i:AS)\s+(?i:STRING)\s*\)"
+    r"\s*,\s*'(yyyyMMdd|yyyyMM)'\s*\)\s*$", re.DOTALL)  # format case-sensitive: mm = minutes
 _MOVING_FN = {"SUM": "moving_sum", "AVG": "moving_average",
               "MIN": "moving_min", "MAX": "moving_max"}
 _CUMULATIVE_FN = {"SUM": "cumulative_sum", "AVG": "cumulative_average",
@@ -127,7 +133,7 @@ def translate_window_measure(measure: dict, dimensions: list[dict],
             f"range '{window['raw_range']}' over the derived order dimension "
             f"'{window['order']}' has no verified mapping (only range: current "
             f"is verified with a formula-ordered window)")
-    annotations: list[dict] = []
+    annotations: list[dict] = _int_key_annotations(window, order)
     if rng["type"] in ("trailing", "leading"):
         wrap = _moving_wrap(window, order, annotations)
     elif rng["type"] == "cumulative":
@@ -167,6 +173,44 @@ def translate_window_measure(measure: dict, dimensions: list[dict],
     if ts.count("first_value (") + ts.count("last_value (") >= 2:
         ts = sqlf_aggregate_window_values(ts)  # only the probed multi-call shape
     return _formula_measure(measure, ts, annotations=_dedupe(annotations))
+
+
+def _int_key_annotations(window: dict, order: dict) -> list[dict]:
+    """BL-634: an integer-key order maps range: current without an offset only."""
+    if not order.get("int_key"):
+        return []
+    if window["range"]["type"] != "current" or window["offset"] is not None:
+        raise UntranslatableError(
+            f"window order dimension '{window['order']}' is a date built from an "
+            f"integer key: it orders the window exactly, but only range: current "
+            f"without an offset is mapped (a date interval cannot be counted on "
+            f"the key)")
+    return [{"kind": "order_by_int_key", "detail": (
+        f"window ordered by the integer key behind '{window['order']}' "
+        f"(a date-formatted integer key sorts as the date does, for keys that are "
+        f"valid dates)")}]
+
+
+def _trunc_order(m, resolver) -> dict | None:
+    """DATE_TRUNC('<day|month|quarter|year>', <column>): ordered by the column."""
+    if not (m and _PLAIN_COLUMN_RE.match(m.group(2).strip())):
+        return None
+    unit = m.group(1).lower()
+    if unit != "day" and unit not in _GRAIN_MONTHS:
+        return None
+    ref = resolver(m.group(2).strip())
+    return {"grain": unit, "sort_ref": ref, "date_ref": ref}
+
+
+def _int_key_order(expr: str, resolver) -> dict | None:
+    """BL-634: TO_DATE(CAST(<column> AS STRING), 'yyyyMMdd'|'yyyyMM') orders by the
+    column. Ordering only: the key is not a date, so no date_ref (a date interval or
+    a scalar MAX stand-in cannot use it)."""
+    k = _INT_KEY_DATE_RE.match(expr)
+    if not (k and _PLAIN_COLUMN_RE.match(k.group(1).strip())):
+        return None
+    return {"grain": "day", "sort_ref": resolver(k.group(1).strip()),
+            "date_ref": None, "int_key": True}
 
 
 def _dedupe(annotations: list[dict]) -> list[dict]:
@@ -218,15 +262,9 @@ def _find_order_dim(order_name: str, dimensions: list[dict],
     if dim["kind"] == "computed":
         stripped = dim["expr"].strip()
         m = _DATE_TRUNC_DIM_RE.match(stripped)
-        if m and _PLAIN_COLUMN_RE.match(m.group(2).strip()):
-            unit = m.group(1).lower()
-            inner = m.group(2).strip()
-            if unit == "day":
-                ref = resolver(inner)
-                return {"grain": "day", "sort_ref": ref, "date_ref": ref}
-            if unit in _GRAIN_MONTHS:
-                ref = resolver(inner)
-                return {"grain": unit, "sort_ref": ref, "date_ref": ref}
+        direct = _trunc_order(m, resolver) or _int_key_order(stripped, resolver)
+        if direct:
+            return direct
         shifted = _shifted_trunc_unit(stripped)
         if shifted is not None:
             unit, column = shifted

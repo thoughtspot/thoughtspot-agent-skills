@@ -63,6 +63,9 @@ _DIRECT_RE = re.compile(rf"^{_DOT_PATH}$")
 _LOD_RE = re.compile(
     r"^([A-Za-z_]\w*)\s*\((.*)\)\s+OVER\s*\(\s*PARTITION\s+BY\s+(.+)\)\s*$",
     re.IGNORECASE | re.DOTALL)
+# BL-635: a whole-table window, AGG(expr) OVER () — an LOD with no partition.
+_LOD_EMPTY_RE = re.compile(r"^([A-Za-z_]\w*)\s*\((.*)\)\s+OVER\s*\(\s*\)\s*$",
+                           re.IGNORECASE | re.DOTALL)
 _OVER_RE = re.compile(r"\bOVER\s*\(", re.IGNORECASE)
 _SUBQUERY_RE = re.compile(r"\(\s*SELECT\b", re.IGNORECASE)
 _COUNT_STAR_RE = re.compile(r"^COUNT\s*\(\s*\*\s*\)$", re.IGNORECASE)
@@ -200,25 +203,38 @@ def extract_cross_refs(expr: str) -> tuple[list[str], list[str]]:
     return refs, lod
 
 
+def _parens_balanced(s: str) -> bool:
+    r"""True when no `)` closes before its `(` — the regexes' `\((.*)\)` can span
+    `MAX(a) - MIN(b)` as one argument."""
+    depth = 0
+    for ch in s:
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        if depth < 0:
+            return False
+    return depth == 0
+
+
 def classify_dimension_expr(expr: str) -> dict:
     """Classify a dimension expr: direct | computed | lod_window | unsupported."""
     e = strip_sql_comments(expr)
     masked = mask_string_literals(e)
     if _SUBQUERY_RE.search(masked):
         return {"kind": "unsupported", "reason": "subquery in dimension expr"}
-    m = _LOD_RE.match(masked)
+    m = _LOD_RE.match(masked) or _LOD_EMPTY_RE.match(masked)
     if m:
+        whole = m.re is _LOD_EMPTY_RE
         inner_expr = e[m.start(2):m.end(2)].strip()
-        partition_tail = e[m.start(3):m.end(3)]
+        partition_tail = "" if whole else e[m.start(3):m.end(3)]
         masked_inner = masked[m.start(2):m.end(2)]
-        masked_tail = masked[m.start(3):m.end(3)]
+        masked_tail = "" if whole else masked[m.start(3):m.end(3)]
         # Reject shapes _LOD_RE over-matches: running/frame windows
         # (ORDER BY / ROWS / RANGE / GROUPS in the OVER clause), argless
         # ranking functions, expressions spanning multiple windows, and
         # ordered-set aggregates (ORDER BY inside the AGG(...) argument
         # list itself, e.g. ARRAY_AGG(x ORDER BY y) OVER (...)) — these
         # have no group_aggregate analogue on ThoughtSpot.
-        if (not inner_expr or _OVER_RE.search(masked_inner)
+        if (not inner_expr or not _parens_balanced(masked_inner)
+                or _OVER_RE.search(masked_inner)
                 or _WINDOW_EXTRAS_RE.search(masked_inner)
                 or _WINDOW_EXTRAS_RE.search(masked_tail)):
             return {"kind": "unsupported",
@@ -227,7 +243,7 @@ def classify_dimension_expr(expr: str) -> dict:
         return {"kind": "lod_window",
                 "inner_agg": m.group(1).upper(),
                 "inner_expr": inner_expr,
-                "partition_by": _split_top_level(partition_tail)}
+                "partition_by": [] if whole else _split_top_level(partition_tail)}
     if _OVER_RE.search(masked):
         return {"kind": "unsupported",
                 "reason": "window function without the recognized "

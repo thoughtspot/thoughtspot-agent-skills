@@ -3686,6 +3686,12 @@ dropped.
 A formula calling a week-dependent function carries an annotation of kind
 `week_start_assumption` (the shared Monday-week-start advisory, BL-334 item 2), computed
 after cross-measure inlining; the `filter` entry has the same `annotations` field.
+Other annotation kinds: `whole_table_lod` on an `AGG(expr) OVER ()` dimension
+(BL-635); `order_by_int_key` on a window ordered by a date built from an integer key
+(BL-634); `subquery_passthrough` on a dimension comparing a row to a whole-table
+dimension, emitted as a `sql_bool_op` scalar subquery that names the source table and
+repeats the MV filter (BL-638; also printed to stderr as a NOTE); and
+`pending_verification` on a measure that reads a whole-table dimension.
 
 Exit codes: `0` — every dimension/measure was processed, whether translated
 or skipped (skips are a reported outcome via `skipped[]`, not a failure);

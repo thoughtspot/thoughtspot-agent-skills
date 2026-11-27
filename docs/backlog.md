@@ -370,12 +370,14 @@ are roughly ordered by value÷effort.
 | BL-558 | Power BI `summarizeBy` count/min/max on a text or date column emits a demoted physical measure | 2026-12-15 |
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
+| BL-609 | Power BI `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated | 2027-01-31 |
+| BL-611 | Power BI `translate_dax` rewrites text inside string literals and column names (`"[Amount]"`, `"a && b"`, `T[NOT]`), labelled Migrated | 2027-01-15 |
 | BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
 | BL-629 | from-databricks-mv: a dimension referencing another dimension is emitted as a nonexistent table column; lint does not check formula exprs — converter fixed 2026-11-27; lint XREF over `formulas[].expr` still open | 2026-12-15 |
 | ~~BL-630~~ | ~~from-databricks-mv: a display-title clash between a column and a formula silently drops the column~~ | DONE (2026-11-27) |
-| BL-634 | from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped | 2026-12-15 |
+| ~~BL-634~~ | ~~from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped~~ | DONE (2026-11-27) |
 | BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` — Databricks fixed 2026-11-27; Snowflake id form and a lint rule still open | 2026-12-15 |
-| BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` | 2026-12-15 |
+| BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` — converter emits the subquery 2026-11-27; raising the SQL defect with the query team remains | 2026-12-15 |
 | BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
 | BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
 | BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
@@ -509,6 +511,7 @@ are roughly ordered by value÷effort.
 | BL-596 | The Databricks mappings name `ai_context` without its path, and their Unmapped Report sample contradicts the v1.1 rows | 2027-02-28 |
 | BL-597 | The Sisense translator keeps its own argument splitter and paren matcher, which break on a quote inside a reference or a paren inside a string | 2027-01-31 |
 | BL-598 | The Ossie converter drops a Table column's `properties` (a `calendar`, say) when the Model surfaces that column as a field, with no issue raised | 2027-01-31 |
+| BL-610 | A DAX `<>` comparison drops blank rows that DAX keeps; probe `!=` and `not ( … in … )` over NULLs | 2027-01-31 |
 | BL-552 | chart builders: the 44 library charts not yet seen on a cluster, the monthly date filter `LAST_N_PERIOD` with `oper: '='`, and a multi-block run with a changed spec | 2027-01-31 |
 | BL-600 | No `ts` command fetches a saved Answer's SQL or rows, so the period-comparison recipe's SQL check is manual | 2027-01-31 |
 | BL-601 | Answer-level Set bucket form for ts-recipe-answer-period-comparison, blocked on SCAL-353379 | 2027-03-31 |
@@ -532,7 +535,7 @@ are roughly ordered by value÷effort.
 | ~~BL-625~~ | ~~ts-audit Dashboard: sort and filter Models by usage~~ | RESOLVED (2026-11-26 — absorbed by the Usage view, ts-audit 3.28.0) |
 | BL-631 | from-databricks-mv: `display_title` title-cases names without display_name (`SKU Type` -> `Sku Type`) | 2027-01-31 |
 | BL-633 | `CAST(col AS STRING)` is dropped, including inside a `TO_DATE` pass-through | 2027-01-31 |
-| BL-635 | from-databricks-mv: whole-table dimension `MAX(expr) OVER ()` rejected as an unsupported LOD shape | 2027-01-31 |
+| ~~BL-635~~ | ~~from-databricks-mv: whole-table dimension `MAX(expr) OVER ()` rejected as an unsupported LOD shape~~ | DONE (2026-11-27) |
 | BL-636 | from-databricks-mv file-only path has no route when the warehouse cannot be described (column types must be inferred) | 2027-01-31 |
 | BL-641 | from-databricks-mv: no entry point for Metric View YAML files without workspace access | 2027-01-31 |
 | BL-642 | from-databricks-mv: converting several MVs over shared tables needs one table set and one import plan | 2027-01-31 |
@@ -545,6 +548,7 @@ are roughly ordered by value÷effort.
 | BL-654 | Test-suite time: pre-commit in parallel, a lighter pytest matrix, then heavy areas by path | 2027-01-31 |
 | BL-655 | `test_worked_examples.py` breaks on pytest 10 (class-scoped fixture as an instance method) | 2027-01-31 |
 | BL-659 | Sisense `--target-model`: round-6 review leftovers (`isBetween`/`isCondition` accepted with any value, field_map onto an unreachable instance, two masked no-`datatype` gaps) | 2027-01-31 |
+| BL-661 | Power BI main DAX path: comments pass into the formula, and PR #517 review leftovers | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -573,6 +577,7 @@ are roughly ordered by value÷effort.
 | BL-440 | ThoughtSpot formula output built as text, precedence repaired afterwards — move to a tree + printer (after BL-441) | after BL-441 |
 | BL-643 | from-databricks-mv: offer one combined Model when several MVs were split only by the chasm trap (parked 2026-11-26) | user request to resume |
 | BL-656 | pytest-xdist PR review leftovers: `_NO_XDIST` match, worker count in evidence, CHANGELOG figures, untested Chrome call sites | 2027-01-31 |
+| BL-660 | Tableau: `[Date] = {FIXED : MAX([Date])}` emits the row-vs-whole-table `group_aggregate` comparison BL-638 found wrong | 2027-01-31 |
 
 ---
 
@@ -18539,6 +18544,59 @@ points to BL-607 item 21 rather than repeating it.
 
 **Target:** 2027-01-31.
 
+## BL-609 — `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated `Tier 2`
+
+**Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
+
+**What.** `ts_cli/powerbi/functions.py` `_calc_approx` rewrites a two-argument `CALCULATE(<agg>, <filter>)` to `sum_if(<cond>, <arg>)` when the first argument *starts* with `SUM(` or `COUNT`/`COUNTA`/`COUNTROWS(`, and keeps only that call's argument. Everything around it is dropped, and the result is labelled Approximated, so `build-model` writes it into the Model as a MEASURE:
+
+- `CALCULATE(SUM(Sales[Profit]) / SUM(Sales[Revenue]), Sales[Region] = "East")` becomes `sum_if(..., [Sales::Profit])`: total profit, not the ratio.
+- `CALCULATE(SUM(Fact[x]) * 100, Fact[s] = "a")` loses the `* 100`.
+- `CALCULATE(COUNTROWS(DISTINCT(Sales[Cust])), ...)` becomes a row count, and `CALCULATE(COUNT(Fact[k]), ...)` counts rows with a blank key, which DAX `COUNT` skips.
+- `CALCULATE(SUM(Fact[x]), FILTER(ALL(Fact), <cond>))` drops the `ALL`, so a total that is the same in every row becomes per row. The running-total idiom `CALCULATE(SUM(Sales[Amount]), FILTER(ALL(Dates[Date]), Dates[Date] <= MAX(Dates[Date])))` is the common case. The rewrite runs before the review gate, so `ALL` never reaches the gate.
+
+PR #517 keeps the inputs its quote-aware argument splitter newly lets through (an `IN {...}` set; a `,` `(` `)` `[` or `]` inside a string; a `[column]` whose parens do not nest; a stray `]`) away from this rewrite, inside the CALCULATE (`_split_reads_differently`) and at every call the translator splits (`_legacy_reads_differently`), so they stay NEEDS REVIEW. The `=`-filter forms above, with nothing the earlier splitter misread, still reach it, as on main.
+
+**Do.**
+1. Give `_calc_approx` the gated parser's exact-shape rule (`ts_cli/powerbi/gated.py`): the first argument must be exactly `SUM(<column>)` or `COUNTROWS(<table>)`, and every filter exactly `<column> = <literal>`, `<column> IN {<literals>}` or a `FILTER(<table>, <one such condition>)` with no `ALL`/`ALLSELECTED`/`REMOVEFILTERS`. Refuse everything else.
+2. Then drop `_split_reads_differently`, since the exact-shape rule covers it (`_legacy_reads_differently` stays until BL-611).
+3. A negative test per shape above, each against an `=` filter, an `IN {...}` set and a filter whose string holds a comma.
+
+**Target:** 2027-01-31.
+
+## BL-610 — a DAX `<>` comparison drops blank rows that DAX keeps; the refused negated IN set is inferred, not probed `Tier 3`
+
+**Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
+
+**What.** In DAX a blank compares unequal to a non-blank value, so `IF(T[s] <> "a", 1, 0)` is 1 for a blank `s`. `translate_dax` emits `if ([T::s] != 'a') then 1 else 0`; in SQL `NULL != 'a'` is NULL, so the row falls to `else` and gives 0. Inferred from DAX and SQL semantics, not probed. PR #517 refuses the related IN-set forms on the main path, where the set's result is negated or compared: under a NOT, a comparison (`= FALSE`, `<> TRUE`) or `ISBLANK`, directly or through a bare paren, `AND`/`OR`, or the value arguments of `IF` (then and else), `SWITCH`, `IFERROR` or `COALESCE`; they are now NEEDS REVIEW. The scan follows those calls only; a set reaching a comparison through another value-passing function would still translate. `<>` still translates as Migrated, as it has on main.
+
+**Do.**
+1. Probe one `!=` and one `not ( ... in { ... } )` formula over a column with NULLs on a live cluster, and record what ThoughtSpot compiles and returns.
+2. If NULL rows drop, emit `( [x] != 'a' or isnull ( [x] ) )` (and the same for `not in`), or flag the comparison Approximated with the reason. Either way, a test per form.
+
+**Target:** 2027-01-31.
+
+## BL-611 — `translate_dax` rewrites text inside DAX string literals and column names, so a filter on a string holding `[Col]`, `&&` or `NOT` matches a different value, labelled Migrated `Tier 2`
+
+**Filed:** 2026-11-19. **Source:** the PR #517 round-6 review, and two finds the PR's author reported in the same thread. All four are on `main` for text the earlier splitter read. PR #517 lets none of them through further: text the earlier splitter reads differently at a call the translator splits (`IF`, `AND`, `OR`, `DIVIDE`, `ROUND`, `CEILING`, `FLOOR`, `CALCULATE`) stays NEEDS REVIEW (`_legacy_reads_differently`, `_split_reads_differently`), and a gated measure is refused when an earlier rewrite changed one of its string literals. Calls the translator does not split are exposed as on main: `CONCATENATE(T[Last], ",  ")` gives `concat([T::Last], ', ')`, a wrong literal, on both.
+
+**What.** Three passes in `ts_cli/powerbi/functions.py` run regex replacements over the whole expression, quoted text included, after the literals have been converted. Each one changes the value a string compares against or the column a reference names, and the result is labelled Migrated:
+
+- `_qualify_home_and_dates` qualifies any `[name]` that matches a home column, inside a string too: `IF(Fact[s] = "[Amount]", 1, 0)` with `Amount` a home column becomes `if ([Fact::s] = '[Fact::Amount]') …`, which matches no row that held `[Amount]`.
+- `_normalize_operators` turns `&&`, `||` and `<>` into `and`, `or` and `!=` everywhere: `IF(T[s] = "a && b", 1, 0)` and `IF(T[s] IN {"a && b"}, 1, 0)` both compare against `'a and b'`.
+- `translate_dax` collapses every run of whitespace, inside strings too: `IF(T[s] = "a  b", 1, 0)` compares against `'a b'`.
+- The same pass lower-cases `NOT` inside a column name: `T[NOT]` becomes `[T::not]`, a different column on a case-sensitive warehouse.
+- `_refs_to_ids` rewrites a sibling measure's `[Name]` inside a string too: with a measure `Revenue`, `IF(Orders[Metric] = "[Revenue]", 1, 0)` compares against `'[formula_Revenue]'` (also on main). The gated path refuses the measure instead (PR #517).
+- The function-name scan (`_map_known_functions`) reads `a(` inside a string or a name as an unknown function, so `IF(T[s] = "a(", 1, 0)` is refused. This one over-refuses rather than giving a wrong value.
+
+**Do.**
+1. Make the rewrite passes (and the whitespace collapse) skip quoted text and `[…]` names, with the scanner `_opaque_end` already gives `_split_args` and `_match_paren`, rather than adding another regex. The wrong values go first.
+2. Then drop `_legacy_reads_differently` (PR #517), which keeps every measure the earlier splitter misread at NEEDS REVIEW until this lands, and flip the tests that pin those refusals (`test_a_measure_the_legacy_splitter_misread_stays_needs_review`, `test_in_set_inside_if`, `test_text_the_legacy_splitter_misread_stays_needs_review_as_on_main`, `test_the_negation_scan_passes_a_multi_member_set_it_is_not_over`): a multi-member IN set inside `IF` and a string with a comma inside a call then translate.
+3. A test per bullet above that asserts the literal or name survives unchanged, and that goes red with the fix reverted.
+4. Two test nits deferred from the same review: `test_value_set_is_linear` (`tests/test_powerbi_gated.py`) asserts a fixed 10-second bound. The quadratic code it guards against took 11.5s in review, so a faster runner would pass with it back and a slower one could fail on correct code; compare the time for n members with 2n instead. `test_deep_nesting_refuses_instead_of_raising` takes about 13s at 3,000 levels, and about 1,100 levels reach the same RecursionError in about 4s.
+
+**Target:** 2027-01-15.
+
 ## BL-612 — `fix_double_aggregation` reads an aggregate name inside a `[…]` reference or a string literal as a naked aggregate `Tier 3`
 
 **Filed:** 2026-11-19. **Source:** the maintainer round on PR #662. **Relates to:** BL-581.
@@ -19280,7 +19338,7 @@ as the literal `CAST({0} AS STRING)` inside a pass-through template. Remove `STR
 
 ## BL-634 — from-databricks-mv: a window ordered by a date built from an integer key is refused, so semi-additive measures on it are skipped `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.227.1: a `yyyyMMdd`/`yyyyMM` integer-key date orders the window by the key; `range: current` without an offset only). **Source:** as BL-629. **Target:** 2026-12-15.
 
 **What.** Warehouses with integer date keys commonly order a semi-additive window by a
 derived date:
@@ -19313,7 +19371,7 @@ ordered by a formula needs a live check first.
 
 ## BL-635 — from-databricks-mv: a whole-table dimension `MAX(<expr>) OVER ()` is rejected as an unsupported LOD shape `Tier 3`
 
-**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.227.1: `AGG(expr) OVER ()` → `group_aggregate ( … , { } , { } )`). **Source:** as BL-629. **Target:** 2027-01-31.
 
 **What.** `Latest Data Month: MAX(TO_DATE(…)) OVER ()`, the latest loaded period used to
 flag a partial month-to-date, fails `parse-mv` with "window function without the
@@ -19392,7 +19450,7 @@ converter output linted clean and only the import caught it.
 
 ## BL-638 — A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers in ThoughtSpot `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** as BL-637. **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.227.1: fix direction (b) done — the converter emits the subquery pass-through for one comparison against a `MAX`/`MIN` `OVER ()` dimension over source columns, skips any other expression naming it, and notes a measure naming it as unverified. Open: (a) raise the SQL generation defect with the query team; whether a measure such as `SUM(x) FILTER (WHERE period = latest_period)` is also affected is unprobed). **Source:** as BL-637. **Target:** 2026-12-15.
 
 **What.** An MV dimension such as `is_partial_period: period = latest_period`, where
 `latest_period` is `MAX(period) OVER ()`, converts to
@@ -19999,3 +20057,53 @@ which found no blocker. **Target:** 2027-01-31.
    Sisense UI carry `datatype`.
 4. `_unmappable` refuses every unknown-kind filter (`contains`, …) even when keyed; a keyed entry
    would be safe for those kinds. Possible relaxation.
+
+---
+
+## BL-661 — Power BI main DAX path: comments pass into the formula, and PR #517 review leftovers `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the maintainer re-review of PR #517 (520,000-measure differential
+fuzz against `main`), which found no remaining blocker. **Target:** 2027-01-31.
+
+1. **A DAX comment is copied into the ThoughtSpot formula** (on `main` too). `DISTINCTCOUNT(T[b]) -- 1`
+   keeps its `-- 1`, and `SUM(T[n]) /* x */ * 2` keeps its comment. If ThoughtSpot reads `-- 1` as
+   minus minus-one, that is a silent `+ 1`. Not probed. Probe one of each on a live cluster; then strip
+   comments outside quoted text before translation, or refuse the measure as the gated parser does.
+2. **The IN-set comment guard can be bypassed** by a `"` inside a `[name]` or `'table'`, because
+   `DAX_STRING.sub` is not bracket-aware. The name comes out mangled (`[T::a'b]`), so import fails
+   loudly. Use `_string_literals`' bracket-aware scan instead.
+3. **A set's truth reaches a comparison through calls the negation scan does not follow**:
+   `IF(INT(T[Country] IN {"DE"}) = 0, 1, 0)`, and the same through `ABS`, `MAX(x, FALSE)`,
+   `CONCATENATE`, `DIVIDE`, `ROUND`, `LEN`, `SIGN` or `UPPER`. Migrated on `main` and on the branch;
+   most should fail ThoughtSpot's type check. BL-610 states the limit. Either refuse a set inside any
+   call other than the condition of `IF`, or probe what these compile to.
+4. **The gated literal guard covers literals, not names.** With a measure `M1` and a column
+   named `x[M1`, `CALCULATE(DISTINCTCOUNT(T[x[M1]))` is Approximated as
+   `unique count ( [T::x[formula_M1] ) + …`: `_refs_to_ids` rewrote the name. Loud (the column does
+   not exist, so import fails). Accept a gated result only when `_apply_calculate_rewrites` left the
+   text unchanged, which covers literals and names alike.
+5. **Test gaps.** Disabling `_split_reads_differently` fails no test: it still changes outcomes,
+   always toward refusal (`CALCULATE(COUNTROWS(T), T[s] IN {"a"})` is refused, where `main` gives
+   `sum_if`). Pin that, or drop it in favour of `_legacy_reads_differently` at the CALCULATE split
+   sites. `ISEMPTY` in `_BLANK_TESTS` is untested and unreachable (ISEMPTY takes a table); drop it.
+
+---
+
+## BL-660 — Tableau: a row compared to a whole-table FIXED LOD emits the comparison BL-638 found wrong `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** review of PR #770 (BL-638's sibling in another converter). **Target:** 2027-01-31.
+
+**What.** The common Tableau latest-date idiom `[Order Date] = {FIXED : MAX([Order Date])}`
+converts (`tools/ts-cli/ts_cli/tableau/lod.py`, the FIXED branch) to
+`[Order Date] = group_aggregate ( MAX([Order Date]) , {} , {} )`. BL-638 found that
+ThoughtSpot's SQL for a row compared with a whole-table `group_aggregate` is wrong
+(grouped on, the join fans out; filtered on, `first_value`/`last_value` partition by the
+period), and that the formula's form is not the cause. The Databricks converter now emits
+a scalar subquery instead (PR #770); the Tableau converter does not.
+
+**Not yet verified** that this exact Tableau form hits the defect: it follows from BL-638
+and was not re-probed.
+
+**Done when.** A live probe on a two-table fixture confirms or refutes the defect for the
+Tableau form; if confirmed, the converter emits a faithful form (a subquery needs the
+source table's FQN, which a Tableau datasource may not give) or skips with the reason.

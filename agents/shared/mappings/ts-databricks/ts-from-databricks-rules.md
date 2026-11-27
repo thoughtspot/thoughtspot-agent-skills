@@ -175,6 +175,41 @@ Parse the pattern: `AGG(col) OVER (PARTITION BY dim1, dim2)` →
 
 The third argument `query_filters()` ensures the LOD respects user-applied filters.
 
+**Whole-table window, `AGG(expr) OVER ()` (BL-635, ts-cli 0.227.1).** An empty
+`OVER ()`, such as `MAX(<date>) OVER ()` for the latest loaded period, maps to
+`group_aggregate ( max ( expr ) , { } , { } )`: one value over the whole source, blind
+to the query's grouping and search filters, as the window is in Databricks. `{ }`
+still respects the model-level filter that mirrors the MV's `filter:` (A3, below),
+which the window also sees. Live-verified 2026-11-26 on its own and grouped on with
+plain and semi-additive measures.
+
+**A row compared to that value (BL-638).** A dimension such as
+`is_latest: period = latest_period` must **not** become
+`[formula_Period] = [formula_Latest Period]`: it imports, but ThoughtSpot's SQL is
+wrong (grouped on, the flag's CTE fans out the join; filtered on, `first_value` /
+`last_value` are partitioned by the period). The converter emits a scalar subquery
+instead, which matched the Metric View in every shape tried live (2026-11-26):
+
+```
+sql_bool_op ( "{0} = (SELECT MAX(<expr>) FROM <source fqn> WHERE <MV filter>)" , [formula_Period] )
+```
+
+It covers one comparison (`=`, `<>`, `!=`, `<`, `<=`, `>`, `>=`) between one
+expression and one `MAX`/`MIN` `OVER ()` dimension over source columns only, for a
+three-part `catalog.schema.table` source. The other side may not hold `AND`, `OR`,
+`NOT`, `IS`, `IN`, `BETWEEN` or `LIKE`, which would regroup the comparison. The SQL may
+not hold a double quote, a brace or a backslash (ThoughtSpot strips a backslash in a
+template). A computed dimension that reads the whole-table dimension in any other form
+is skipped with the reason; a direct dimension or a partitioned LOD naming it still
+falls to a nonexistent column, which fails at import (BL-629). An `OVER ()` argument
+naming an earlier dimension is skipped, because Databricks' reading of a name there is
+unprobed. An `OVER ()` dimension or a flag naming an earlier dimension that the
+converter skipped is skipped too, rather than read as the same-named source column. The
+subquery names the source table and repeats the MV filter as text, so it must be
+edited per environment and lineage does not see it. A **measure** that names the
+whole-table dimension is translated, with a `pending_verification` annotation: that
+case was not probed.
+
 **Live-verified 2026-07-09** (see `docs/audit/2026-07-09-dbx-semantic-claim-matrix.md`,
 A1/A2) — this claim is **CONFIRMED on the ThoughtSpot side**: `query_filters()` makes
 the LOD respect user-applied filters under both a query-level pin and a model-level
@@ -383,6 +418,17 @@ Maps to ThoughtSpot `last_value` formula:
 ```
 last_value ( sum ( [FILLED_INVENTORY] ) , query_groups ( ) , { [balance_date] } )
 ```
+
+**Order by a date built from an integer key (BL-634, ts-cli 0.227.1).** When the
+`order:` dimension is `TO_DATE(CAST(<key> AS STRING), 'yyyyMMdd')` (or `'yyyyMM'`, the
+pattern case-sensitive), the window is ordered by the integer key itself:
+`first_value ( sum ( [m] ) , query_groups ( ) , { [FACT::DATE_KEY] } )`. Those formats
+sort the integer exactly as the date, for keys that are valid dates (a sentinel such
+as `99999999` does not). Only `range: current` without an `offset` is
+mapped on such a dimension; a date interval cannot be counted on the key, so a
+trailing, leading, cumulative or offset window over it is refused. Live-verified
+2026-11-26 as the hand-built workaround (semi-additive opening and closing balances
+matched the Metric View).
 
 **Period filter** (flow metric, `order:` is a truncated dimension):
 
