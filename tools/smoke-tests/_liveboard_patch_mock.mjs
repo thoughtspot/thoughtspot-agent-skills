@@ -136,6 +136,17 @@ await scenario("a block keeps the skill's other tiles as they are, without searc
   ok(vizNamed(st.doc, "Bubbles").answer.table.client_state === "set by the user", "a kept tile's answer was rebuilt");
 });
 
+await scenario("--check and --list print their whole output to a pipe before they exit", async () => {
+  // Found on macOS: Node writes to a pipe asynchronously there, so process.exit right after console.log kept only
+  // the first 8,192 bytes of a --check block (about 31 KB). Linux writes pipes synchronously, so CI never saw it.
+  const c = pack(["--check", "pulse-kpi-best"]);
+  ok(c.code === 0 && c.blocks.length === 1, "check: " + c.err);
+  ok(c.blocks[0].length > 8192, "check block is " + c.blocks[0].length + " bytes, cut at the pipe buffer");
+  new AsyncFunction("ts", c.blocks[0]);
+  const l = spawnSync("node", [PACK, "--liveboard", DIR, "--list", "--all"], { encoding: "utf8", env: { ...ENV, LIVEBOARD_PACK_OFFLINE: "1" } });
+  ok(l.status === 0 && /^core js=\d+ css=\d+ {2}mode=\w+$/m.test(l.stdout), "list did not end with its core line: " + l.stdout.slice(-200) + l.stderr);
+});
+
 await scenario("B1: a native chart and a note on a spec tab do not crash validate, check or commit", async () => {
   const st = { doc: withViz(withViz(clone(base), clone(native), 0, 20), clone(note), 6, 20) };
   for (const mode of ["--validate", "--check"]) { const p = pack([mode, "pulse-kpi-best"]); const r = await run(p.blocks[0], { doc: clone(st.doc) }); ok(!r.refused || mode === "--check", mode + ": " + JSON.stringify(r).slice(0, 300)); }
