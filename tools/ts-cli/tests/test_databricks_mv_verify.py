@@ -133,7 +133,7 @@ class TestPlan:
 
     @pytest.mark.parametrize("agg,want", [
         ("SUM", "SUM"), ("AVERAGE", "AVG"), ("MIN", "MIN"), ("MAX", "MAX"),
-        ("COUNT", "COUNT"), ("COUNT_DISTINCT", "COUNT_DISTINCT"), ("VARIANCE", None),
+        ("COUNT", "COUNT"), ("COUNT_DISTINCT", "COUNT(DISTINCT)"), ("VARIANCE", None),
     ])
     def test_raw_measure_wrapper(self, agg, want):
         fn, reason = mv.agentql_function({"kind": "raw_measure", "aggregation": agg})
@@ -202,7 +202,7 @@ class TestShapes:
 class TestSql:
     MEASURES = [{"mv_name": "revenue", "title": "Revenue", "agentql": "SUM"},
                 {"mv_name": "odd`name", "title": 'Odd "Name"', "agentql": "AGG"},
-                {"mv_name": "buyers", "title": "Buyers", "agentql": "COUNT_DISTINCT"}]
+                {"mv_name": "buyers", "title": "Buyers", "agentql": "COUNT(DISTINCT)"}]
     TITLES = {"region": "Region", "is_returned": "Is Returned", "odd`dim": 'Odd "Dim"'}
 
     def test_databricks_total(self):

@@ -47,8 +47,9 @@ MAX_MISMATCHES_KEPT = 50
 _FLAG_NAME = re.compile(r"^(is|has)[_ ]", re.IGNORECASE)
 
 #: A raw Model column's aggregation -> the AgentQL aggregate that reproduces it.
+#: Read side only: the key is the Model's aggregation, the value an AgentQL label.
 _RAW_AGGREGATE = {"SUM": "SUM", "AVERAGE": "AVG", "MIN": "MIN", "MAX": "MAX",
-                  "COUNT": "COUNT", "COUNT_DISTINCT": "COUNT_DISTINCT"}
+                  "COUNT": "COUNT", "COUNT_DISTINCT": "COUNT(DISTINCT)"}
 
 #: Databricks Statement Execution `type_name` -> how a value of it is normalised.
 _KIND_BY_TYPE = {"DATE": "date", "TIMESTAMP": "timestamp", "TIMESTAMP_NTZ": "timestamp",
@@ -278,7 +279,7 @@ def databricks_sql(mv_fqn: str, shape: dict, measures: list[dict]) -> str:
 
 def _agentql_measure(m: dict) -> str:
     ref = f'"t1".{_dq(m["title"])}'
-    if m["agentql"] == "COUNT_DISTINCT":
+    if m["agentql"] == "COUNT(DISTINCT)":
         return f"COUNT(DISTINCT {ref})"
     return f"{m['agentql']}({ref})"
 
