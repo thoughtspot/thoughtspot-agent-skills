@@ -90,7 +90,7 @@ are roughly ordered by value÷effort.
 | ~~BL-029~~ | ~~Coverage matrix for ts-convert-to-databricks-mv~~ | DONE |
 | BL-240 | ASOF join returns wrong numbers on BOTH legs ($2,100 true → 3,800 in / 5,100 out); matrix row 9 reads as "mapped" | next SF converter pass |
 | BL-241 | `non additive by` dropped on the return leg — a $5,300 semi-additive balance comes back $25,400 | next SF converter pass, with BL-253 |
-| BL-242 | fixed `PARTITION BY` silently dropped from every cumulative/moving window — YTD becomes a lifetime total | next formula pass, with BL-180 |
+| ~~BL-242~~ | ~~fixed `PARTITION BY` silently dropped from every cumulative/moving window — YTD becomes a lifetime total~~ | DONE (2026-11-28) |
 | BL-243 | `with tag` folded into the metric expr — destroys all 5 metrics, `build-model` still exits 0 | next SF converter pass |
 | BL-244 | SV `variables` translate 8/8 / 0 skipped (false success), then fail at import and re-deploy | next SF converter pass, with BL-031 |
 | ~~BL-315~~ | ~~from-Databricks: a `range: current` + `offset:` window ordered by a raw date drops the offset silently — prior-year measures return this year's number~~ | DONE (2026-09-28) |
@@ -9936,7 +9936,7 @@ additive fallback is the defect** — not the missing emitter.
 **Affects:** `tools/ts-cli/ts_cli/sv_translate.py` (`_translate_window`),
 `agents/shared/mappings/ts-snowflake/ts-snowflake-formula-translation.md` (window decision
 table), `agents/cli/ts-convert-from-snowflake-sv/references/coverage-matrix.md` row 25.
-**Status:** OPEN.
+**Status:** DONE (2026-11-28, ts-cli 0.228.2: a fixed `PARTITION BY` on a cumulative or moving window is refused with the reason; `PARTITION BY EXCLUDING` still translates. The same PR fixed moving offsets, `-1 , 0` for every frame, and an `ORDER BY` with no frame read as a grand total).
 
 **Third of the three wrong-numbers findings** (BL-240, BL-241), and the cheapest to fix.
 

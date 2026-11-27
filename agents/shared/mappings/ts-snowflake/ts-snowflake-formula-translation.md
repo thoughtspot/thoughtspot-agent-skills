@@ -593,13 +593,13 @@ SUM(tbl.metric) OVER (
 | SV window clause | ThoughtSpot translation | Rationale |
 |---|---|---|
 | `PARTITION BY EXCLUDING dim ORDER BY dim ROWS UNBOUNDED PRECEDING` | `cumulative_sum ( [T::col] , [T::dim] )` | EXCLUDING matches TS's dynamic partition behaviour |
-| `ORDER BY dim ROWS UNBOUNDED PRECEDING` (no PARTITION BY) | `moving_sum ( group_aggregate(sum([T::col]), {[T::PK]}, query_filters()) , -1 , 0 , [T::dim] )` | No EXCLUDING = need explicit grain via group_aggregate |
-| `PARTITION BY dim1 ORDER BY dim2 ROWS UNBOUNDED PRECEDING` (fixed partition) | `moving_sum ( group_aggregate(sum([T::col]), {[T::dim1]}, query_filters()) , -1 , 0 , [T::dim2] )` | Fixed partition **approximated** via group_aggregate grain — see the caveat below |
+| `ORDER BY dim ROWS UNBOUNDED PRECEDING` (no PARTITION BY), or `ORDER BY dim` with no frame (SQL's default frame) | `cumulative_sum ( [T::col] , [T::dim] )` | The partition comes from the search, as with EXCLUDING. **Corrected 2026-11-28:** this row said `moving_sum ( … , -1 , 0 , … )`; ThoughtSpot rejects that window at query time (`INVALID_WINDOWING_FUNCTION_ARGUMENTS`, live on the internal cluster) |
+| `PARTITION BY dim1 ORDER BY dim2 ROWS UNBOUNDED PRECEDING` (fixed partition) | **Refused** by `translate-formulas` (BL-242), with the reason | No native form: a window cannot declare its own partition — see the caveat below |
 
 Verified 2026-07-10 on SE cluster: `moving_sum(group_aggregate(sum([PAYROLL_COMPANIES::FAILED_PAYROLLS]), {[PAYROLL_COMPANIES::PAYROLL_COMPANY_ID]}, query_filters()), -1, 0, [PAYROLL_COMPANIES::PAYROLL_COMPANY_CREATED_AT])` — compiles and imports via TML.
 
-**Caveat on the fixed-partition row — it is an approximation, not an equivalence
-(2026-07-30).** `group_aggregate` fixes the grain of the **measure** being windowed; it does not
+**Why the fixed-partition row is refused (2026-07-30; refused in code since 2026-11-28).**
+The form this row used to give was an approximation, not an equivalence: `group_aggregate` fixes the grain of the **measure** being windowed; it does not
 give `moving_sum` a `PARTITION BY`. `moving_sum` has **no partition argument at all** — confirmed
 by rejection on `se-thoughtspot`, 2026-07-30: a `{ [attr] }` or `query_groups ( )` argument after
 the order columns is rejected at the parser, in both `moving_*` and `cumulative_*`. So the window
@@ -631,15 +631,18 @@ ThoughtSpot syntax: `moving_{func}(measure, start, end, attr1 [, attr2, ...])`
 - Additional dimensions added at query time dynamically enter `PARTITION BY`
   — achieved using `PARTITION BY EXCLUDING`
 
-**Frame bound conversion — negate the sign:**
+**Frame bound conversion — the two arguments count in opposite directions:**
 
-| TS value | SQL frame bound |
-|---|---|
-| Positive `n` | `n PRECEDING` |
-| `0` | `CURRENT ROW` |
-| Negative `-n` | `n FOLLOWING` |
+| Argument | Positive `n` | `0` | Negative `-n` |
+|---|---|---|---|
+| start (2nd) | `n PRECEDING` | `CURRENT ROW` | `n FOLLOWING` |
+| end (3rd) | `n FOLLOWING` | `CURRENT ROW` | `n PRECEDING` |
 
-Both args use the same rule independently.
+Live-confirmed 2026-11-28 from ThoughtSpot's generated SQL: `( 2 , 0 )` is
+`2 PRECEDING AND CURRENT ROW`, `( 1 , 1 )` is `1 PRECEDING AND 1 FOLLOWING`, `( 1 , -1 )` is
+`1 PRECEDING AND 1 PRECEDING`, and `( -1 , 0 )` (a start after the end) is rejected with
+`INVALID_WINDOWING_FUNCTION_ARGUMENTS`. This line used to say both arguments use the same
+rule, which reads `( 1 , 1 )` as `1 PRECEDING AND 1 PRECEDING`.
 
 **Verified examples:**
 

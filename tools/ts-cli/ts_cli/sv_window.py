@@ -103,10 +103,11 @@ def _extract_over_clause(expr: str, over_pos: int) -> tuple[str, str]:
 
 
 def _clause_boundaries(upper: str) -> tuple:
-    """Find regex match positions for PARTITION BY, ORDER BY, ROWS."""
+    """Find regex match positions for PARTITION BY, ORDER BY, and the frame
+    (ROWS or RANGE)."""
     pb = re.search(r"\bPARTITION\s+BY\b", upper)
     ob = re.search(r"\bORDER\s+BY\b", upper)
-    rows = re.search(r"\bROWS\b", upper)
+    rows = re.search(r"\b(ROWS|RANGE)\b", upper)
     return pb, ob, rows
 
 
@@ -131,13 +132,38 @@ def _parse_order_cols(spec: str, start: int, end: int) -> list[dict]:
     return cols
 
 
-def _parse_frame(spec: str, start: int) -> str | None:
-    text = spec[start:].strip().upper()
-    if "UNBOUNDED PRECEDING" in text:
-        return "cumulative"
-    if "PRECEDING" in text:
-        return "moving"
-    return "other"
+_BOUND_RE = re.compile(r"^(UNBOUNDED|\d+)\s+(PRECEDING|FOLLOWING)$|^CURRENT\s+ROW$")
+
+
+def _bound(text: str) -> tuple[str, int] | None:
+    """('unbounded', 0) | ('rows', n preceding; negative = following), or None."""
+    m = _BOUND_RE.match(" ".join(text.split()))
+    if not m:
+        return None
+    if m.group(1) is None:
+        return ("rows", 0)
+    if m.group(1) == "UNBOUNDED":
+        return ("unbounded", 0 if m.group(2) == "PRECEDING" else 1)
+    n = int(m.group(1))
+    return ("rows", n if m.group(2) == "PRECEDING" else -n)
+
+
+def _parse_frame(spec: str, kind_start: int, start: int) -> dict:
+    """The frame clause as {'kind': cumulative|moving|other, 'unit': ROWS|RANGE,
+    'preceding': N, 'following': M}. ThoughtSpot's moving_* takes (N preceding,
+    M following); `N PRECEDING AND CURRENT ROW` is (N, 0) — offset table,
+    thoughtspot-formula-patterns.md, verified 2026-06-15."""
+    unit = spec[kind_start:start].strip().upper()
+    text = " ".join(spec[start:].strip().upper().split())
+    m = re.match(r"^BETWEEN (.+) AND (.+)$", text)
+    lo, hi = (_bound(m.group(1)), _bound(m.group(2))) if m else (_bound(text), ("rows", 0))
+    if lo is None or hi is None:
+        return {"kind": "other", "unit": unit}
+    if lo == ("unbounded", 0) and hi == ("rows", 0):
+        return {"kind": "cumulative", "unit": unit}
+    if lo[0] == "unbounded" or hi[0] == "unbounded" or unit != "ROWS":
+        return {"kind": "other", "unit": unit}
+    return {"kind": "moving", "unit": unit, "preceding": lo[1], "following": -hi[1]}
 
 
 def _parse_window_spec(spec: str) -> dict[str, Any]:
@@ -157,7 +183,7 @@ def _parse_window_spec(spec: str) -> dict[str, Any]:
         end = rows.start() if rows else len(spec)
         order = _parse_order_cols(spec, ob.end(), end)
 
-    frame = _parse_frame(spec, rows.end()) if rows else None
+    frame = _parse_frame(spec, rows.start(), rows.end()) if rows else None
 
     return {"partition_by": partition, "order_by": order, "frame": frame}
 
@@ -173,6 +199,33 @@ def _unwrap_agg(ts_expr: str) -> tuple[str, str]:
     return m.group(1).strip(), m.group(2).strip()
 
 
+def _frame_kind(frame: dict | None, order: list) -> str | None:
+    """cumulative | moving | other, or None for an unordered window (an LOD).
+    An ORDER BY with no frame is SQL's default RANGE BETWEEN UNBOUNDED PRECEDING AND
+    CURRENT ROW: a running total, not a grand total."""
+    if not order:
+        return None
+    if frame is None:
+        return "cumulative"
+    return frame["kind"]
+
+
+def _refuse_unmappable_order(partition: list, order: list) -> None:
+    """moving_* / cumulative_* take their partition from the query and order ascending
+    by one column (thoughtspot-formula-patterns.md, Window Functions, 2026-07-30).
+    `PARTITION BY EXCLUDING <dim>` (the query's dimensions minus <dim>) is that same
+    query partition, so it passes; a fixed PARTITION BY does not."""
+    if any(not p.upper().startswith("EXCLUDING") for p in partition):
+        raise UntranslatableError(
+            "a running or moving window with an explicit PARTITION BY has no native "
+            "ThoughtSpot form (the partition comes from the search); build it as a "
+            "sql_*_aggregate_op pass-through wrapped in group_aggregate")
+    if len(order) != 1 or order[0]["dir"] != "asc":
+        raise UntranslatableError(
+            "a running or moving window ordered DESC or by several columns has no "
+            "ThoughtSpot form (moving_* / cumulative_* order ascending by one column)")
+
+
 def _translate_window(
     ts_agg_expr: str,
     window_spec: dict[str, Any],
@@ -183,8 +236,11 @@ def _translate_window(
     partition = window_spec["partition_by"]
     order = window_spec["order_by"]
     frame = window_spec["frame"]
+    kind = _frame_kind(frame, order)
+    if kind in ("cumulative", "moving"):
+        _refuse_unmappable_order(partition, order)
 
-    if frame == "cumulative" and order:
+    if kind == "cumulative":
         fn = _AGG_TO_CUMULATIVE.get(agg_fn)
         if fn is None:
             raise UntranslatableError(
@@ -192,13 +248,19 @@ def _translate_window(
         order_col = resolver(order[0]["col"])
         return f"{fn} ( {inner} , {order_col} )"
 
-    if frame in ("moving",) and order:
+    if kind == "moving":
         fn = _AGG_TO_MOVING.get(agg_fn)
         if fn is None:
             raise UntranslatableError(
                 f"moving window for '{agg_fn}' not mapped")
         order_col = resolver(order[0]["col"])
-        return f"{fn} ( {inner} , -1 , 0 , {order_col} )"
+        return (f"{fn} ( {inner} , {frame['preceding']} , {frame['following']} , "
+                f"{order_col} )")
+    if kind == "other":
+        raise UntranslatableError(
+            f"window frame {frame.get('unit', '')} with these bounds has no ThoughtSpot "
+            f"form (moving_* counts ROWS between N preceding and M following; a RANGE "
+            f"offset, an UNBOUNDED FOLLOWING end, or an unparsed bound is refused)")
 
     group_fn = _AGG_TO_GROUP.get(agg_fn)
     if group_fn is None:
