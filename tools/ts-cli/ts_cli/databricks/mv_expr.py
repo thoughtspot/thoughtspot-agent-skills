@@ -204,7 +204,7 @@ def extract_cross_refs(expr: str) -> tuple[list[str], list[str]]:
 
 
 def _parens_balanced(s: str) -> bool:
-    """True when no `)` closes before its `(` — the regexes' `\((.*)\)` can span
+    r"""True when no `)` closes before its `(` — the regexes' `\((.*)\)` can span
     `MAX(a) - MIN(b)` as one argument."""
     depth = 0
     for ch in s:

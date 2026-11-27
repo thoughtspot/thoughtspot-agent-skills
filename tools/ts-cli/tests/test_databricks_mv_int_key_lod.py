@@ -245,8 +245,8 @@ class TestReviewRound1:
                     "MAX(record_month) OVER ()"})
         out = _run(mv=mv)
         assert "unprobed" in _skip(out, "latest_month")["reason"]
-        # the flag then falls to the BL-629 nonexistent-column path, which fails at import
-        assert "group_aggregate" not in _flag(out)["ts_expr"]
+        # the flag names the skipped dimension, so it is skipped too
+        assert _flag(out) is None and _skip(out)["name"] == "is_mtd"
 
     def test_any_value_measure_gets_the_note(self):
         mv = MV + "  - name: Months Behind\n    expr: DATEDIFF(ANY_VALUE(latest_month), MAX(record_month))\n"
@@ -256,3 +256,42 @@ class TestReviewRound1:
     def test_unbalanced_over_argument_stays_unsupported(self):
         assert classify_dimension_expr(
             "MAX(source.a) - MIN(source.b) OVER ()")["kind"] == "unsupported"
+
+
+class TestReviewRound2:
+    SKIPPED_EARLIER = """
+version: 1.1
+source: cat.sch.fact
+dimensions:
+  - name: order_date
+    expr: MAKE_DATE(YEAR(source.order_date), MONTH(source.order_date), 1)
+  - name: latest_month
+    expr: MAX(order_date) OVER ()
+  - name: is_latest_month
+    expr: order_date = latest_month
+measures:
+  - name: n
+    expr: COUNT(1)
+"""
+
+    def test_skipped_earlier_dimension_is_not_read_as_the_column(self):
+        out = translate_metric_view(parse_metric_view(self.SKIPPED_EARLIER), {"source": "FACT"})
+        names = {s["name"] for s in out["skipped"]}
+        assert {"order_date", "latest_month", "is_latest_month"} <= names
+        assert not any("sql_bool_op" in (e["ts_expr"] or "") for e in out["translated"])
+
+    def test_cast_type_is_not_a_dimension_name(self):
+        mv = """
+version: 1.1
+source: cat.sch.fact
+dimensions:
+  - name: date
+    expr: source.D
+  - name: latest
+    expr: MAX(CAST(source.ORDER_TS AS DATE)) OVER ()
+measures:
+  - name: n
+    expr: COUNT(1)
+"""
+        out = translate_metric_view(parse_metric_view(mv), {"source": "FACT"})
+        assert "latest" not in {s["name"] for s in out["skipped"]}

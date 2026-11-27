@@ -203,7 +203,8 @@ template). A computed dimension that reads the whole-table dimension in any othe
 is skipped with the reason; a direct dimension or a partitioned LOD naming it still
 falls to a nonexistent column, which fails at import (BL-629). An `OVER ()` argument
 naming an earlier dimension is skipped, because Databricks' reading of a name there is
-unprobed. The
+unprobed. An `OVER ()` dimension or a flag naming an earlier dimension that the
+converter skipped is skipped too, rather than read as the same-named source column. The
 subquery names the source table and repeats the MV filter as text, so it must be
 edited per environment and lineage does not see it. A **measure** that names the
 whole-table dimension is translated, with a `pending_verification` annotation: that

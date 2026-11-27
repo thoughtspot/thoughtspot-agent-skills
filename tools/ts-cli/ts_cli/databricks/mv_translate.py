@@ -476,10 +476,34 @@ def translate_metric_view(parsed: dict, tables: dict, *,
         _DIM_REFS.reset(token)
 
 
+def _refuse_skipped_earlier_dimension(dim: dict, parsed: dict,
+                                      lods: dict[str, dict]) -> None:
+    """An OVER () dimension, or a flag reading one, that names an earlier dimension the
+    converter skipped would fall through to the same-named source column, which that
+    dimension shadows in Databricks — silently, in these two paths (BL-638 review)."""
+    whole = dim["kind"] == "lod_window" and not dim["partition_by"]
+    if not whole and not (dim["kind"] == "computed" and references(dim["expr"], lods)):
+        return
+    earlier = []
+    for d in parsed["dimensions"]:
+        if d is dim:
+            break
+        earlier.append(str(d["name"]).casefold())
+    skipped = set(earlier) - set(_DIM_REFS.get())
+    hit = [n for n in names_in(dim["inner_expr"] if whole else dim["expr"])
+           if n.casefold() in skipped]
+    if hit:
+        raise UntranslatableError(
+            f"'{hit[0]}' names an earlier dimension that was skipped; it would fall "
+            f"through to the same-named source column, which that dimension shadows "
+            f"in Databricks")
+
+
 def _translate_dimension_in_mv(dim: dict, parsed: dict, tables: dict,
                                lods: dict[str, dict]) -> dict:
     """translate_dimension, except a flag comparing a row to an earlier whole-table
     OVER () dimension, which becomes a scalar subquery (BL-638)."""
+    _refuse_skipped_earlier_dimension(dim, parsed, lods)
     if dim["kind"] == "computed":
         named = [n for n in references(dim["expr"], lods) if n in _DIM_REFS.get()]
         if named:

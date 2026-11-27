@@ -22,6 +22,7 @@ _CMP_OPS = ("<=", ">=", "<>", "!=", "=", "<", ">")
 _SEG = r"(?:`[^`]+`|[A-Za-z_][\w$]*)"
 _NAME_RE = re.compile(rf"{_SEG}(?:\.{_SEG})*")
 _FIRST_SEG_RE = re.compile(_SEG)
+_CAST_TYPE_RE = re.compile(r"\bAS\s+$", re.IGNORECASE)
 # An operator that binds looser than a comparison, or is a predicate of its own: on
 # the non-latest side it would regroup the comparison inside the template.
 _LOOSE_KW_RE = re.compile(r"\b(AND|OR|NOT|IS|IN|BETWEEN|LIKE|RLIKE|ILIKE)\b", re.IGNORECASE)
@@ -81,8 +82,10 @@ def _unquote(seg: str) -> str:
 
 def names_in(expr: str) -> list[str]:
     """Every unqualified (single-segment) name in an expression, unquoted."""
-    return [_unquote(name) for _, _, name in _bare_names(clean_sql(expr))
-            if len(split_dot_path(name)) == 1]
+    text = clean_sql(expr)
+    return [_unquote(name) for start, _, name in _bare_names(text)
+            if len(split_dot_path(name)) == 1
+            and not _CAST_TYPE_RE.search(text[:start])]  # `AS DATE` is a type
 
 
 def references(expr: str, lods: dict[str, dict]) -> list[str]:
