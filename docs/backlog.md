@@ -18553,11 +18553,11 @@ points to BL-607 item 21 rather than repeating it.
 - `CALCULATE(COUNTROWS(DISTINCT(Sales[Cust])), ...)` becomes a row count, and `CALCULATE(COUNT(Fact[k]), ...)` counts rows with a blank key, which DAX `COUNT` skips.
 - `CALCULATE(SUM(Fact[x]), FILTER(ALL(Fact), <cond>))` drops the `ALL`, so a total that is the same in every row becomes per row. The running-total idiom `CALCULATE(SUM(Sales[Amount]), FILTER(ALL(Dates[Date]), Dates[Date] <= MAX(Dates[Date])))` is the common case. The rewrite runs before the review gate, so `ALL` never reaches the gate.
 
-PR #517 keeps the inputs its quote-aware argument splitter newly lets through (an `IN {...}` set; a `,` `(` `)` `[` or `]` inside a string; a `[column]` whose parens do not nest; a stray `]`) away from this rewrite (`_split_reads_differently`), so they stay NEEDS REVIEW. The `=`-filter forms above already behave this way on main.
+PR #517 keeps the inputs its quote-aware argument splitter newly lets through (an `IN {...}` set; a `,` `(` `)` `[` or `]` inside a string; a `[column]` whose parens do not nest; a stray `]`) away from this rewrite, inside the CALCULATE (`_split_reads_differently`) and anywhere else in the measure (`_measure_reads_differently`), so they stay NEEDS REVIEW. The `=`-filter forms above, with nothing the earlier splitter misread, still reach it, as on main.
 
 **Do.**
 1. Give `_calc_approx` the gated parser's exact-shape rule (`ts_cli/powerbi/gated.py`): the first argument must be exactly `SUM(<column>)` or `COUNTROWS(<table>)`, and every filter exactly `<column> = <literal>`, `<column> IN {<literals>}` or a `FILTER(<table>, <one such condition>)` with no `ALL`/`ALLSELECTED`/`REMOVEFILTERS`. Refuse everything else.
-2. Then drop `_split_reads_differently`, since the exact-shape rule covers it.
+2. Then drop `_split_reads_differently`, since the exact-shape rule covers it (`_measure_reads_differently` stays until BL-611).
 3. A negative test per shape above, each against an `=` filter, an `IN {...}` set and a filter whose string holds a comma.
 
 **Target:** 2027-01-31.
@@ -18566,7 +18566,7 @@ PR #517 keeps the inputs its quote-aware argument splitter newly lets through (a
 
 **Filed:** 2026-11-18. **Source:** the PR #517 round-5 review.
 
-**What.** In DAX a blank compares unequal to a non-blank value, so `IF(T[s] <> "a", 1, 0)` is 1 for a blank `s`. `translate_dax` emits `if ([T::s] != 'a') then 1 else 0`; in SQL `NULL != 'a'` is NULL, so the row falls to `else` and gives 0. Inferred from DAX and SQL semantics, not probed. PR #517 refuses the related IN-set forms on the main path, where the set's result is negated or compared (`NOT ... IN {...}` in any spelling, `... IN {...} = FALSE`, `<> TRUE`); they are now NEEDS REVIEW. `<>` still translates as Migrated, as it has on main.
+**What.** In DAX a blank compares unequal to a non-blank value, so `IF(T[s] <> "a", 1, 0)` is 1 for a blank `s`. `translate_dax` emits `if ([T::s] != 'a') then 1 else 0`; in SQL `NULL != 'a'` is NULL, so the row falls to `else` and gives 0. Inferred from DAX and SQL semantics, not probed. PR #517 refuses the related IN-set forms on the main path, where the set's result is negated or compared: under a NOT, a comparison (`= FALSE`, `<> TRUE`) or `ISBLANK`, directly or through a bare paren, `AND`/`OR`, or the value arguments of `IF` (then and else), `SWITCH`, `IFERROR` or `COALESCE`; they are now NEEDS REVIEW. The scan follows those calls only; a set reaching a comparison through another value-passing function would still translate. `<>` still translates as Migrated, as it has on main.
 
 **Do.**
 1. Probe one `!=` and one `not ( ... in { ... } )` formula over a column with NULLs on a live cluster, and record what ThoughtSpot compiles and returns.
@@ -18576,19 +18576,21 @@ PR #517 keeps the inputs its quote-aware argument splitter newly lets through (a
 
 ## BL-611 — `translate_dax` rewrites text inside DAX string literals and column names, so a filter on a string holding `[Col]`, `&&` or `NOT` matches a different value, labelled Migrated `Tier 2`
 
-**Filed:** 2026-11-19. **Source:** the PR #517 round-6 review, and two finds the PR's author reported in the same thread. All four are on `main`, and PR #517 changes none of them; it only lets the IN-set form of the second through.
+**Filed:** 2026-11-19. **Source:** the PR #517 round-6 review, and two finds the PR's author reported in the same thread. All four are on `main` for text the earlier splitter read. PR #517 lets none of them through further: a measure whose calls the earlier splitter read differently stays NEEDS REVIEW (`_measure_reads_differently`), so a string with a comma inside a call, or a multi-member IN set inside a call, still refuses as on main.
 
 **What.** Three passes in `ts_cli/powerbi/functions.py` run regex replacements over the whole expression, quoted text included, after the literals have been converted. Each one changes the value a string compares against or the column a reference names, and the result is labelled Migrated:
 
 - `_qualify_home_and_dates` qualifies any `[name]` that matches a home column, inside a string too: `IF(Fact[s] = "[Amount]", 1, 0)` with `Amount` a home column becomes `if ([Fact::s] = '[Fact::Amount]') …`, which matches no row that held `[Amount]`.
-- `_normalize_operators` turns `&&`, `||` and `<>` into `and`, `or` and `!=` everywhere: `IF(T[s] = "a && b", 1, 0)` and `IF(T[s] IN {"a && b", "c"}, 1, 0)` both compare against `'a and b'`. PR #517 lets IN sets inside a call reach this pass, so the second form was NEEDS REVIEW before it.
+- `_normalize_operators` turns `&&`, `||` and `<>` into `and`, `or` and `!=` everywhere: `IF(T[s] = "a && b", 1, 0)` and `IF(T[s] IN {"a && b"}, 1, 0)` both compare against `'a and b'`.
+- `translate_dax` collapses every run of whitespace, inside strings too: `IF(T[s] = "a  b", 1, 0)` compares against `'a b'`.
 - The same pass lower-cases `NOT` inside a column name: `T[NOT]` becomes `[T::not]`, a different column on a case-sensitive warehouse.
 - The function-name scan (`_map_known_functions`) reads `a(` inside a string or a name as an unknown function, so `IF(T[s] = "a(", 1, 0)` is refused. This one over-refuses rather than giving a wrong value.
 
 **Do.**
-1. Make the three rewrite passes skip quoted text and `[…]` names, with the scanner `_opaque_end` already gives `_split_args` and `_match_paren`, rather than adding a fourth regex. The first three are wrong values, so they go first.
-2. A test per bullet above that asserts the literal or name survives unchanged, and that goes red with the fix reverted.
-3. Two test nits deferred from the same review: `test_value_set_is_linear` (`tests/test_powerbi_gated.py`) asserts a fixed 10-second bound. The quadratic code it guards against took 11.5s in review, so a faster runner would pass with it back and a slower one could fail on correct code; compare the time for n members with 2n instead. `test_deep_nesting_refuses_instead_of_raising` takes about 13s at 3,000 levels, and about 1,100 levels reach the same RecursionError in about 4s.
+1. Make the rewrite passes (and the whitespace collapse) skip quoted text and `[…]` names, with the scanner `_opaque_end` already gives `_split_args` and `_match_paren`, rather than adding another regex. The wrong values go first.
+2. Then drop `_measure_reads_differently` (PR #517), which keeps every measure the earlier splitter misread at NEEDS REVIEW until this lands, and flip the tests that pin those refusals (`test_a_measure_the_legacy_splitter_misread_stays_needs_review`, `test_in_set_inside_if`, `test_text_the_legacy_splitter_misread_stays_needs_review_as_on_main`, `test_the_negation_scan_passes_a_multi_member_set_it_is_not_over`): a multi-member IN set inside `IF` and a string with a comma inside a call then translate.
+3. A test per bullet above that asserts the literal or name survives unchanged, and that goes red with the fix reverted.
+4. Two test nits deferred from the same review: `test_value_set_is_linear` (`tests/test_powerbi_gated.py`) asserts a fixed 10-second bound. The quadratic code it guards against took 11.5s in review, so a faster runner would pass with it back and a slower one could fail on correct code; compare the time for n members with 2n instead. `test_deep_nesting_refuses_instead_of_raising` takes about 13s at 3,000 levels, and about 1,100 levels reach the same RecursionError in about 4s.
 
 **Target:** 2027-01-15.
 
