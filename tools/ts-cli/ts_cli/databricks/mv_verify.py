@@ -222,7 +222,7 @@ def _integer_literal(present: list) -> Optional[str]:
 def _date_literal(present: list) -> Optional[str]:
     days = sorted({str(v)[:10] for v in present
                    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(v)[:10])})
-    return f"TO_DATE('{days[0]}')" if len(days) > 1 else None
+    return f"DATE '{days[0]}'" if len(days) > 1 else None
 
 
 _LITERAL_BY_KIND = {"string": _string_literal, "integer": _integer_literal,
@@ -235,7 +235,8 @@ def pick_filter_literal(values: list, kind: str) -> Optional[str]:
     needed. A string value is passed over when it is empty, has spaces at either end,
     holds a quote or a backslash (the two sides escape them differently), or equals
     another value in all but case (AgentQL compares strings case-insensitively, BL-333).
-    An integer is written as is; a date as `TO_DATE('yyyy-mm-dd')`."""
+    An integer is written as is; a date as `DATE 'yyyy-mm-dd'` (live-checked on both
+    sides 2026-11-27; `TO_DATE('yyyy-mm-dd')` failed in AgentQL's SQL on Databricks)."""
     pick = _LITERAL_BY_KIND.get(kind)
     return pick([v for v in values if v is not None]) if pick else None
 

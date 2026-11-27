@@ -226,7 +226,7 @@ class TestShapes:
         ([" East", "West"], "string", "'West'"),     # never a value with outer spaces
         (["7", "12", "7"], "integer", "7"),
         (["7"], "integer", None),
-        (["2024-02-29", "2024-01-31"], "date", "TO_DATE('2024-01-31')"),
+        (["2024-02-29", "2024-01-31"], "date", "DATE '2024-01-31'"),
         (["1.5", "2.5"], "float", None),
     ])
     def test_pick_filter_literal(self, values, kind, want):
@@ -242,7 +242,7 @@ class TestShapes:
         assert mv.search_filter_shape(dims, values)[0]["filter"] == ["n", "1"]
         values["n"] = ("integer", ["1"])
         assert mv.search_filter_shape(dims, values)[0]["filter"] == [
-            "d", "TO_DATE('2024-01-31')"]
+            "d", "DATE '2024-01-31'"]
 
     def test_search_filter_reason_when_nothing_qualifies(self):
         shape, reason = mv.search_filter_shape(
@@ -588,8 +588,8 @@ def _literal(text):
         return text == "true"
     if text.startswith("'"):
         return text[1:-1]
-    if text.startswith("TO_DATE("):
-        return dt.date.fromisoformat(text[len("TO_DATE('"):-2])
+    if text.startswith("DATE '"):
+        return dt.date.fromisoformat(text[len("DATE '"):-1])
     return int(text)
 
 
