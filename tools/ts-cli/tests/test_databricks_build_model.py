@@ -263,19 +263,16 @@ class TestBuildColumnsAndFormulas:
         assert cols[-1] == {"name": "MV Filter", "formula_id": "formula_MV Filter",
                             "properties": {"column_type": "ATTRIBUTE"}}
 
-    def test_column_formula_name_clash_drops_physical_column(self):
-        # a direct dim titled "Status" AND a formula titled "Status":
-        # resolve_name_collisions keeps the formula, drops the physical column.
-        cols, formulas, _ = build_columns_and_formulas(
-            [_t("status", "column", "ATTRIBUTE", table="T", column="status"),
-             _t("status_flag", "formula", "ATTRIBUTE", ts_expr="[T::x] = 1",
-                display_name="Status")], None)
-        assert [f["name"] for f in formulas] == ["Status"]
-        assert [c["name"] for c in cols] == ["Status"]           # the paired entry only
-        assert "formula_id" in cols[0] and "column_id" not in cols[0]
-        # BL-099 #2 — the shadowed physical column never reaches columns[], so
-        # the duplicate-title guard must NOT fire on this already-resolved case.
-        _check_no_duplicate_display_names(cols)
+    def test_column_formula_name_clash_fails_loud(self):
+        # a direct dim titled "Status" AND a formula titled "Status" are two MV
+        # dimensions: the shared resolve_name_collisions used to keep the formula and
+        # drop the column without a word (BL-630). It now fails like a
+        # formula-vs-formula clash (BL-099 #2).
+        with pytest.raises(ValueError, match=r"duplicate display title\(s\): \['Status'\]"):
+            build_columns_and_formulas(
+                [_t("status", "column", "ATTRIBUTE", table="T", column="status"),
+                 _t("status_flag", "formula", "ATTRIBUTE", ts_expr="[T::x] = 1",
+                    display_name="Status")], None)
 
     def test_paired_columns_survive_collision_pass(self):
         # regression for the sequencing trap: N formulas in, N paired columns out.

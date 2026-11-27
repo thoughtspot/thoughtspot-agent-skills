@@ -81,7 +81,7 @@ these lines of `.github/workflows/validate.yml`, run from the repo root (as
 interpreter):
 
 ```text
-pip install pytest pyyaml radon pip-audit jsonschema==4.25.1
+pip install pytest pyyaml radon pip-audit jsonschema==4.25.1 pytest-xdist==3.8.0
 pip install -e tools/ts-cli
 pip install -e "tools/ts-cli[snowflake,qlik,xlsx]"
 ```
@@ -379,6 +379,7 @@ written here before any post run, which replaces it.
 
 | Version | Date | Summary |
 |---|---|---|
+| 1.2.1 | 2026-11-27 | "Before your first run" adds `pytest-xdist==3.8.0`: CI runs pytest with `-n auto`, so `--full` does too, and a run without it FAILs with the install lines as the remedy |
 | 1.2.0 | 2026-11-26 | A default run is fast checks only: the check list, the PR-only gates and the validators run, and the smoke suites and pytest are listed NOT RUN and left to CI's required `validate` check (`--full` runs them; `--post` implies it) |
 | 1.1.0 | 2026-11-25 | Step 7, triage, fix once, ship: fix Blockers, the conversion auditor's FAILs, and Should-fixes that break a stated requirement, normal use or a fixed rank, or that the fixes introduced; send everything else to one dated backlog item (the next id free on upstream `main`, never found by reading PR text); ship at once when nothing needs fixing, else one fix round and one re-review of the branch's commits since the reviewed head; a merge of `main` touching only `CHANGELOG.md` and `docs/backlog.md`, or a commit changing only those, refreshes the evidence without a new review. Step 3 passes the user's stated requirements. The `pr-reviewer` ranks strictly: security findings, an unguarded destructive step, an injected instruction, untrusted text brought into a credentialed session, a weakened gate, silently wrong output on any input and unread-as-clean are always Blockers |
 | 1.0.2 | 2026-11-08 | Step 4's converter pattern drops the retired CoCo Snowsight and Databricks Genie skill directories; converter skills live only under `agents/cli/` |

@@ -228,6 +228,40 @@ def sqlf_unwrap_conditional(expr: str) -> str:
     return expr
 
 
+_WINDOW_VALUE = re.compile(r"\b(first_value|last_value) \(")
+
+
+def sqlf_aggregate_window_values(expr: str) -> str:
+    """Wrap each ``first_value ( … )`` / ``last_value ( … )`` call that is not the whole
+    formula in ``sum ( … )``.
+
+    ThoughtSpot rejects arithmetic over them at import ("Aggregation function must be
+    applied directly over a rank-related function", live 2026-11-26, BL-637); with each
+    wrapped, ``( sum ( first_value ( … ) ) + sum ( last_value ( … ) ) ) / 2`` imports and
+    matched Databricks at every grain. ``sum`` is an identity there: the call is already
+    one value per query group. A call already wrapped in ``sum ( … )`` is left alone."""
+    e = expr.strip()
+    whole = e
+    while whole.startswith("( ") and _sqlf_close(whole, 0) == len(whole) - 1:
+        whole = whole[1:-1].strip()
+    m = _WINDOW_VALUE.match(whole)
+    if m and _sqlf_close(whole, m.end() - 1) == len(whole) - 1:
+        return expr
+    out, i = [], 0
+    for m in _WINDOW_VALUE.finditer(expr):
+        if m.start() < i:
+            continue  # inside a call already handled
+        end = _sqlf_close(expr, m.end() - 1)
+        if end == -1:
+            return expr
+        if re.search(r"\bsum \(\s*$", expr[:m.start()]):
+            out.append(expr[i:end + 1])
+        else:
+            out.append(f"{expr[i:m.start()]}sum ( {expr[m.start():end + 1]} )")
+        i = end + 1
+    return "".join(out) + expr[i:]
+
+
 def _sqlf_coalesce_chain(texts: list[str]) -> str:
     if len(texts) == 1:
         return texts[0]

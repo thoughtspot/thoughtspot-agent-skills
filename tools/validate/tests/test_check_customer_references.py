@@ -193,6 +193,9 @@ ADVERSARIAL = {
 # allocates enough at 1M, and not at 250K, to trigger a full collection of the whole
 # pytest heap (~500K objects in CI), a one-off cost that pushed 3.11 to x8.1-8.7 on
 # linear code. Measured on the CI runners with it off: x4.0 on every seed, 3.10-3.14.
+# The clock is this process's CPU time, not wall time: under pytest-xdist the other workers
+# preempt the scan, and wall time counts what they take. Measured 2026-11-27 at load ~80 on
+# 18 cores, linear code: wall x1.6-8.8 (x12.6 once in a full -n auto run), CPU x3.1-5.5.
 _RATIO_LIMIT = 8.0
 _CEILING_1M = 10.0        # seconds; still far below the ~100s of the quadratic version
 _NOISE_FLOOR = 0.05       # a 1M scan this fast cannot be quadratic; ratios of tiny times are noise
@@ -205,9 +208,9 @@ def _scan_seconds(seed: str, size: int) -> float:
     gc.collect()
     gc.disable()
     try:
-        start = time.perf_counter()
+        start = time.process_time()
         ccr.scan_text(line, "x.md")
-        return time.perf_counter() - start
+        return time.process_time() - start
     finally:
         gc.enable()
 
@@ -216,7 +219,10 @@ def _scan_seconds(seed: str, size: int) -> float:
 def test_adversarial_line_scans_in_linear_time(name):
     seed = ADVERSARIAL[name]
     small = big = float("inf")
-    for _ in range(3):                    # best of up to 3, retried only while it looks bad
+    # Best of up to 5, retried only while it looks bad: CPU time still varies a little with
+    # cache and frequency contention from the other workers. Quadratic code fails every
+    # attempt, at x16.
+    for _ in range(5):
         small = min(small, _scan_seconds(seed, 250_000))
         big = min(big, _scan_seconds(seed, 1_000_000))
         assert big < _CEILING_1M, f"{name}: {big:.2f}s at 1M"

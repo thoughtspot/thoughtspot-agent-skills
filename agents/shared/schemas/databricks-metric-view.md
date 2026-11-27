@@ -1051,6 +1051,23 @@ measures:
 
 ---
 
+## Name Resolution Inside Expressions (live-probed 2026-11-27)
+
+Which name an unqualified identifier in a dimension, measure or `filter:` expression means.
+The vendor YAML reference says only that a field may reference "columns from the source data
+or a previously defined field". Probed on DBSQL 2026.35 with a dimension `COUNTRY_CODE`
+shadowing the source column of the same name:
+
+| Where the identifier appears | It resolves to |
+|---|---|
+| A dimension defined **before** the shadowing dimension | the source column |
+| A dimension defined **after** it | the **dimension** (an earlier dimension shadows a same-named source column) |
+| A measure's `FILTER (WHERE …)` clause (the case probed; other positions in a measure assumed the same) | the **dimension** |
+| The global `filter:` | the **source column** (the filter never reads a dimension) |
+| A backticked `display_name` | nothing: `UNRESOLVED_COLUMN` (a display name is a label, not an identifier) |
+
+`ts databricks translate-formulas` follows these rules for dimension and measure expressions and `filter:` (BL-629). Unprobed positions keep the source-column reading: a scalar subquery (it reads the physical table), an LOD `OVER (PARTITION BY …)`, and a window's `order:` dimension. Known gaps are listed in BL-629.
+
 ## Comparison with Snowflake Semantic Views
 
 | Feature | Snowflake SV | Databricks MV |

@@ -371,14 +371,14 @@ are roughly ordered by value÷effort.
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
 | BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
-| BL-629 | from-databricks-mv: a dimension referencing another dimension is emitted as a nonexistent table column; lint does not check formula exprs | 2026-12-15 |
-| BL-630 | from-databricks-mv: a display-title clash between a column and a formula silently drops the column | 2026-12-15 |
+| BL-629 | from-databricks-mv: a dimension referencing another dimension is emitted as a nonexistent table column; lint does not check formula exprs — converter fixed 2026-11-27; lint XREF over `formulas[].expr` still open | 2026-12-15 |
+| ~~BL-630~~ | ~~from-databricks-mv: a display-title clash between a column and a formula silently drops the column~~ | DONE (2026-11-27) |
 | BL-634 | from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped | 2026-12-15 |
-| BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` | 2026-12-15 |
+| BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` — Databricks fixed 2026-11-27; Snowflake id form and a lint rule still open | 2026-12-15 |
 | BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` | 2026-12-15 |
 | BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
 | BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
-| BL-652 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
+| BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
 
 ### Tier 3 — Opportunistic
 
@@ -541,6 +541,8 @@ are roughly ordered by value÷effort.
 | BL-648 | ts-audit Usage view (3.28.0): review nits deferred | 2027-01-31 |
 | BL-650 | SQL translators: `NOT x BETWEEN a AND b` binds NOT to the operand, and `x IN (SELECT …)` reads the subquery as a column | 2027-01-31 |
 | BL-651 | ts-audit: four small defects from the 2026-11-27 SE run (D8 GUID flips with API order, empty audit date, Usage view details, owner emails in the export) | 2027-01-31 |
+| BL-654 | Test-suite time: pre-commit in parallel, a lighter pytest matrix, then heavy areas by path | 2027-01-31 |
+| BL-655 | `test_worked_examples.py` breaks on pytest 10 (class-scoped fixture as an instance method) | 2027-01-31 |
 
 ### Tier 4 — Deferred
 
@@ -568,6 +570,7 @@ are roughly ordered by value÷effort.
 | ~~BL-273~~ | ~~`tools/ts-cli/CLAUDE.md:153` asserts `Current version: 0.135.0`; package is at 0.139.0 and nothing gates the line~~ | DONE (2026-09-22) |
 | BL-440 | ThoughtSpot formula output built as text, precedence repaired afterwards — move to a tree + printer (after BL-441) | after BL-441 |
 | BL-643 | from-databricks-mv: offer one combined Model when several MVs were split only by the chasm trap (parked 2026-11-26) | user request to resume |
+| BL-656 | pytest-xdist PR review leftovers: `_NO_XDIST` match, worker count in evidence, CHANGELOG figures, untested Chrome call sites | 2027-01-31 |
 
 ---
 
@@ -19129,7 +19132,7 @@ Nits the two reviews raised and the PR did not fix:
 
 ## BL-629 — from-databricks-mv: a dimension that references another dimension is emitted as a nonexistent table column `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** converting three customer Metric Views offline with
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.3: the converter resolves a dimension named in a later dimension or a measure, under Databricks scope rules live-probed 2026-11-27 (`name` only; earlier dimensions only; one shadows a same-named source column; `filter:` reads source columns). Still open: a direct dimension whose expression is another dimension's name; a simple aggregate or `COUNT(DISTINCT)` over a computed dimension; a skipped earlier dimension, whose name then falls through to a same-named source column where Databricks would read the dimension (also on main); a window `order:` over a computed dimension that names an earlier one (`month: DATE_TRUNC('MONTH', date)` with `date` a dimension) still orders by a nonexistent column (also on main); a reference by formula id does not carry the referenced formula's `week_start_assumption` annotation; LOD and scalar-subquery positions are unprobed and keep the source-column reading; and the lint XREF extension to `formulas[].expr`. Also noticed, pre-existing: a `DATE'2026-01-05'` literal emits `[SRC::DATE] to_date(…)`). **Source:** converting three customer Metric Views offline with
 `ts databricks parse-mv` / `translate-formulas` / `build-model` (ts-cli 0.224.1).
 **Target:** 2026-12-15.
 
@@ -19163,7 +19166,7 @@ inside `formulas[].expr`. That would have caught this, and any later case of thi
 
 ## BL-630 — from-databricks-mv: two columns with one display name, and a direct column is silently dropped `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.225.3: build-model fails loud on a column-vs-formula title clash). **Source:** as BL-629. **Target:** 2026-12-15.
 
 **What.** One MV had `order_month` with `display_name: Month` (a formula) and a direct
 dimension `Month: source.MONTH` (month number). `build-model` exited 0 and the Model had one
@@ -19356,7 +19359,7 @@ list. The skill's Step 10-FILE then says to check them against `DESCRIBE TABLE` 
 
 ## BL-637 — Arithmetic over `first_value` / `last_value` fails import unless each call is wrapped in `sum ( )` `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** live validation of three converted Metric Views on
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.225.3: Databricks wraps the calls after cross-measure inlining and in a multi-aggregate semi-additive window, `sql_forms.sqlf_aggregate_window_values`; still open: the Snowflake translator references such a metric by formula id, and whether `sum ( [formula_X] )` imports is unprobed; and the lint rule). **Source:** live validation of three converted Metric Views on
 simba-test against a Databricks fixture. **Target:** 2026-12-15.
 
 **What.** A measure built from two semi-additive measures, such as
@@ -19766,14 +19769,133 @@ predate or sit beside that work. **Target:** 2027-01-31.
    full email address, and it is copied into the CSV and JSON export. Say so in SKILL.md's
    "Candidates file" section, since the file is meant to be shared with owners.
 
+## BL-652 — Child processes of the local test runs find a bare `python3` or `ts` by PATH, not by the chosen interpreter `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review of `fix/checks-python-on-path`.
+**Target:** 2027-01-31.
+
+That PR puts the chosen interpreter's directory first on PATH for the hook's and
+`pr-ready`'s pytest runs, which fixes the case it was raised for: `CHECKS_PYTHON` naming a
+virtual environment, whose `bin/` holds a `python3` that is the same interpreter. Two
+siblings remain:
+
+1. **An interpreter the search chose outside a venv** (no `CHECKS_PYTHON`, Homebrew's
+   `python3.12` with pytest) can sit beside a different `python3` (Homebrew's 3.15, no
+   pyyaml), or in a keg directory with no `python3` at all, so a child's bare `python3`
+   is still the wrong one. Fix: prepend a private temporary directory holding `python3` and
+   `python` wrapper scripts that `exec` the interpreter's absolute path (wrappers, not
+   symlinks, which lose the venv), with a test whose stub directory has a different
+   `python3`.
+2. **`pr-ready --full`'s smoke runs** (`run_checks.py:178`) keep the inherited PATH;
+   `smoke_ts_convert_from_dbt.py:40` and `smoke_ts_convert_to_dbt.py:48` start a bare `ts`,
+   which locally is whatever `ts` is first on PATH, not the venv's.
+
+## BL-653 — Headless-Chrome audit report tests fail intermittently under the full suite `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** two pre-commit runs of the full suite on
+`fix/checks-python-on-path`, each failing one different Chrome-rendering test.
+**Target:** 2026-12-18.
+
+**What.** Under the full suite (~14,000 tests, ~12 minutes), one headless-Chrome test in the
+`ts audit` report fails per run, a different one each time, and the same test passes on
+every rerun alone (3 of 3, and 31 of 31 for its file):
+
+- `tools/ts-cli/tests/test_audit_formula_tree.py::test_links_carry_an_awkward_guid_verbatim`
+  — "the page produced no probe output; DOM head: ''" (an empty DOM).
+- `tools/ts-cli/tests/test_audit_model_nav.py::test_the_routes_reports_already_link_to_still_work[formulas/m-1/graph-v-formulas-formulas, columns and parameters]`.
+
+**Why it matters.** A flaky gate costs a ~12-minute rerun of the hook per hit, and teaches
+people to reach for `--no-verify` (it did, once, on 2026-11-27). If CI hits it too, it
+blocks merges.
+
+**First step.** Find the shared mechanism (`report_browser`, the Chrome invocation: a
+fixed timeout, a shared profile or port, load from a busy machine) and make the wait
+deterministic rather than raising a timeout.
+
+**Update (2026-11-27): cause found, main case fixed.** With an everyday Chrome open, macOS
+runs each headless launch from a temporary "code-sign clone" of the app bundle, which
+Chrome creates and removes; now and then a launch lands in a clone whose framework is gone
+and dyld aborts it (`rc=-6`, empty stdout, `Library not loaded … code_sign_clone` on
+stderr). Reproduced with 8 parallel runs of the 15 Chrome test files under CPU load: 8
+failures, all this signature. `report_browser.render` now retries only that signature (up
+to 3 launches) and reports Chrome's exit code and stderr when it fails; the same stress
+run then gave 0 clone-race failures (4 launches recovered). The ERD tests' `browser.py` and
+the quest smoke `smoke_explore.py` launch Chrome through the same `run_chrome`, loaded by path,
+so every headless-Chrome test helper gets the retry. A hang now fails with Chrome's stderr tail
+instead of a bare `TimeoutExpired`. **Still open:** one render in
+about 3,500 hung to the 120 s timeout under that extreme load (8 suites plus 4 CPU
+burners), far beyond a normal hook or CI run. Not retried, since a retry on timeout would
+also hide a genuine hang; revisit if it is seen at normal load.
+
+## BL-654 — Test-suite time: pre-commit in parallel, a lighter matrix, heavy areas by path `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the pytest-xdist PR (CI's pytest lines run `-n auto`). **Target:** 2027-01-31.
+
+**What.** CI and `pr-ready --full` now run pytest on every CPU. Three further steps were
+measured or proposed and left out of that PR:
+
+1. **Pre-commit runs the unit suites serially** (`scripts/pre-commit.sh`, `run_pytest`), about
+   8.5 minutes on a commit that changes a `.py` file. Add `-n auto` when the hook's Python
+   can import `xdist`, and keep the serial run when it cannot, so a contributor without it
+   is not blocked.
+2. **The `pytest-matrix` job re-runs all ~14,000 tests on four more interpreters** and is
+   the slowest part of the required check. Run 3.10 and 3.14, the ends of
+   `requires-python`, on every PR, and 3.11 and 3.13 on pushes to `main` and weekly.
+3. **Skip heavy areas by path only after 1 and 2.** The ts-audit report's browser tests
+   (~180 s serial) and quest's browser test could run only when their own paths change,
+   with a full run on every push to `main` so a wrong skip shows the same day. Never a
+   "docs-only, skip pytest" rule: on 2026-11-26 a change to
+   `.github/pull_request_template.md` failed `test_repo_publisher.py`.
+
+**Done when.** Each of the three is built or declined with its reason here.
+
+## BL-655 — `test_worked_examples.py` breaks on pytest 10 `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the pytest-xdist PR's trial runs. **Target:** 2027-01-31.
+
+**What.** pytest 9.2 warns `PytestRemovedIn10Warning: Class-scoped fixtures defined as
+instance methods are deprecated` for the `example` fixture in
+`tools/ts-cli/tests/test_worked_examples.py`. CI installs `pytest` unpinned, so the day
+pytest 10 is released that file fails on every PR.
+
+**Fix direction.** Make the fixture a `@classmethod` setting attributes on `cls`, as the
+warning says; or pin pytest's major version in the workflow's installs (and `pr_ready.py`'s
+copies of them) and move it deliberately.
+
+## BL-656 — pytest-xdist PR: review leftovers `Tier 4`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review of `feat/pytest-parallel` (no
+Blockers; these were triaged out of the PR). **Target:** 2027-01-31.
+
+1. **`_NO_XDIST` in `tools/validate/pr_ready.py` matches anywhere in the output, at any exit
+   code.** A failing test that quotes pytest's usage line is reported as "pytest-xdist is not
+   installed". Require exit 4 and anchor to `^\S*pytest: error: unrecognized arguments:`;
+   the note header still says "tests skipped for a missing module" for that case.
+2. **The evidence's "Not reproduced locally" list omits the worker count** (local: one per
+   CPU; CI: 4).
+3. **`CHANGELOG.md` 2026-11-27 figures:** "about 2 minutes at 18 workers" is one point of a
+   spread (the main invocation took 107-187 s across three evidence runs; record the range),
+   and "needs `pytest-xdist==3.8.0`" (any xdist with `-n` works; 3.8.0 is CI's pin).
+4. **Four of five headless-Chrome call sites are untested** (main's code since #768):
+   `agents/cli/ts-object-model-erd/tests/browser.py` and the three launches in
+   `tools/quest/tests/smoke_explore.py` go through `run_chrome`, but only `render`'s call
+   site has a test, so one reverted to a bare `subprocess.run` would pass every test.
+
+The review's other Chrome-retry points (three `_dump_dom` copies, a retry condition broader
+than its docstrings, BL-653 not updated) were overtaken by #768, which
+merged first: one `run_chrome` in `report_browser.py` retrying only the code-sign-clone
+signature, used by every headless-Chrome helper. This PR took #768's version.
+
+**Done when.** Each is fixed or declined with its reason here.
+
 ---
 
-## BL-652 — Table column `name` vs `db_column_name`: lint gate gap and merge-mode mis-binding `Tier 2`
+## BL-657 — Table column `name` vs `db_column_name`: lint gate gap and merge-mode mis-binding `Tier 2`
 
 **Filed:** 2026-11-27. **Source:** the `pr-ready` review (`pr-reviewer` + `conversion-consistency-auditor`)
-of `fix/tableau-table-column-physical-names` (ts-cli 0.225.3, ts-convert-from-tableau 1.47.2), which
-names Tableau Table TML columns by physical name. Everything here was outside that PR's one purpose.
-**Target:** 2026-12-15.
+of `fix/tableau-table-column-physical-names` (#767; ts-cli 0.225.4, ts-convert-from-tableau 1.47.2),
+which names Tableau Table TML columns by physical name, and the maintainer review of #767. Everything
+here was outside that PR's one purpose. **Target:** 2026-12-11 for item 2, 2026-12-15 for the rest.
 
 **Should-fix (a lint gate gap, and a silent wrong binding in merge mode).**
 
@@ -19786,13 +19908,20 @@ names Tableau Table TML columns by physical name. Everything here was outside th
    test, add one proving the failure is caught. Also correct the stale claims: lint called "the
    model<->table name-alignment arbiter" in `tests/test_tableau_build_model_tables.py`, and 14547's
    cause list in `agents/shared/schemas/ts-model-conversion-invariants.md` and `ts-tml-import-gate.md`.
-2. **Merge mode can silently rewrite a bare ref to the wrong column (pre-existing).**
+2. **Merge mode can silently rewrite a bare ref to the wrong column (pre-existing code, made reachable
+   by #767 — do this first).**
    `build_col_table_map` / `build_column_lookup` (`ts_cli/model_builder.py`) put `column_id` suffixes
    and display names into one upper-cased dict, so a display name (`Region` on one column) can
    overwrite another column's physical suffix (`REGION`). Reproduced via
    `prepare_formulas_for_merge`: `[REGION] = 'West'` came out bound to `BILLING_REGION`. Fires only
-   for refs still bare after translation. Fix in its own PR: keep the two namespaces apart, physical
-   suffix first.
+   for refs still bare after translation. Before #767 a Model with a captioned column failed at
+   Phase 1, so Phase 2 never ran; now it imports and the standard Phase-2 formula step
+   (`build-model --existing-guid`) binds silently: a TWB with `[REGION]` captioned "Sales Region"
+   and then `[BILLING_REGION]` captioned "Region" rewrites `[REGION] = 'West'` to
+   `[Orders::BILLING_REGION] = 'West'`, which passes `filter_unresolvable_formulas` and imports. Needs
+   a column with no metadata-record and a caption equal (ignoring case) to another column's
+   physical name. Fix in its own PR: index every `column_id` suffix first, then add display names
+   with `setdefault`, in both functions, with that repro as a test.
 
 **Nits and warnings.**
 
@@ -19806,11 +19935,19 @@ names Tableau Table TML columns by physical name. Everything here was outside th
    `db_column_name`, or key `cmap` by it.
 5. The new test checks `column_id` suffixes only; add a two-table fixture with a join and a formula
    on a captioned column so join `on:` and `[TABLE::X]` formula refs are pinned too.
-6. Upgrade note: Tables imported by ts-cli 0.225.2 or earlier still carry caption names, so a Model
-   exported over them still filters formulas in `--existing-guid` merge mode, and re-importing a
-   regenerated Table over its guid renames its columns (Answers/Liveboards on it may be affected).
-   Add a line to the skill (re-import Tables first) and to coverage-matrix row 140.
-7. Step 5a of the skill tells the reviewer to correct `db_column_name` in Table TML; add: change
-   `db_column_name` only, since the Model's `column_id` resolves against `name`.
+6. Upgrade note (the skill line and coverage-matrix row 140 landed in #767): still open is whether
+   re-importing a regenerated Table over its GUID renames its columns and what that does to
+   Answers and Liveboards on it. Not live-verified.
+7. The formula translator builds `[TABLE::X]` from the Tableau local name, not `db_column_name`
+   (`strings_types.py`, `col_table_map` keyed by local name). A column whose local name differs
+   from its remote name (`[REGION1]` over `REGION`, no caption) gives `[T1::REGION1]`, which
+   matches no Table column; lint does not parse formula bodies, so it passes and the formula
+   fails at import. Loud, but build X from `db_column_name` there too.
 8. Wording: `tableau/tables.py`'s module docstring still says it mirrors PowerBI's shape and speaks
-   of a display name; rename `test_build_table_tml_table_map_and_column_map_override_physical_names_only`.
+   of a display name (Power BI keeps display names on Table columns); the `_write_table_tml_files`
+   docstring says the cmap sets `db_column_name` only; rename
+   `test_build_table_tml_table_map_and_column_map_override_physical_names_only`.
+9. The name-collision drop (`formula_common.py`) removes a physical column whose caption equals a
+   formula's name, and Table TML is written from the cleaned columns, so the column disappears
+   from the Table too (a join on it dangles; lint catches it). Under the Table-is-physical rule
+   the Table should keep every physical column (pre-existing).

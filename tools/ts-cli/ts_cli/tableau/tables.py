@@ -106,9 +106,10 @@ def _table_columns(table, cmap):
         # The Table column is NAMED by its physical name, not the Tableau caption:
         # a Model column_id `TABLE::X` resolves X against the Table column's
         # `name` (live-verified: a `::<physical name>` id was rejected while the
-        # column was named by its caption), and the model builder, formula translator
-        # and merge filter all build X from db_column_name. The caption stays
-        # the user-facing name on the Model column.
+        # column was named by its caption), and the model builder and merge filter
+        # build X from db_column_name. (The formula translator builds X from the
+        # Tableau local name, which usually but not always equals it — BL-657.)
+        # The caption stays the user-facing name on the Model column.
         db_name = cmap.get(c["name"]) or _dbname(c["name"])
         cols.append({
             "name": db_name,
