@@ -241,16 +241,20 @@ def _source_shape(source: list[tuple[str, str]]) -> str | None:
         return "literal"
     if kinds == ["ident"]:
         return "column"
-    if (len(source) >= 4 and kinds[0] == "ident" and texts[0] in ("SUM", "COUNT", "AVG")
+    return "aggregate" if _one_column_aggregate(kinds, texts) else None
+
+
+def _one_column_aggregate(kinds: list[str], texts: list[str]) -> bool:
+    """SUM/COUNT/AVG of one column, COUNT(DISTINCT col) or COUNT(*)."""
+    if not (len(texts) >= 4 and kinds[0] == "ident" and texts[0] in ("SUM", "COUNT", "AVG")
             and texts[1] == "(" and texts[-1] == ")"):
-        body = texts[2:-1]
-        if body == ["*"] and texts[0] == "COUNT":
-            return "aggregate"
-        if body[:1] == ["DISTINCT"]:
-            body = body[1:]
-        if len(body) == 1 and kinds[len(source) - 2] == "ident":
-            return "aggregate"
-    return None
+        return False
+    body, body_kinds = texts[2:-1], kinds[2:-1]
+    if body == ["*"]:
+        return texts[0] == "COUNT"
+    if body[:1] == ["DISTINCT"]:
+        body, body_kinds = body[1:], body_kinds[1:]
+    return body_kinds == ["ident"]
 
 
 def _strip_outer_parens(s: str) -> str:
