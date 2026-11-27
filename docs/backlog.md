@@ -570,6 +570,7 @@ are roughly ordered by value÷effort.
 | BL-440 | ThoughtSpot formula output built as text, precedence repaired afterwards — move to a tree + printer (after BL-441) | after BL-441 |
 | BL-643 | from-databricks-mv: offer one combined Model when several MVs were split only by the chasm trap (parked 2026-11-26) | user request to resume |
 | BL-656 | pytest-xdist PR review leftovers: `_NO_XDIST` match, worker count in evidence, CHANGELOG figures, untested Chrome call sites | 2027-01-31 |
+| BL-657 | Tableau: `[Date] = {FIXED : MAX([Date])}` emits the row-vs-whole-table `group_aggregate` comparison BL-638 found wrong | 2027-01-31 |
 
 ---
 
@@ -19886,3 +19887,24 @@ merged first: one `run_chrome` in `report_browser.py` retrying only the code-sig
 signature, used by every headless-Chrome helper. This PR took #768's version.
 
 **Done when.** Each is fixed or declined with its reason here.
+
+---
+
+## BL-657 — Tableau: a row compared to a whole-table FIXED LOD emits the comparison BL-638 found wrong `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** review of PR #770 (BL-638's sibling in another converter). **Target:** 2027-01-31.
+
+**What.** The common Tableau latest-date idiom `[Order Date] = {FIXED : MAX([Order Date])}`
+converts (`tools/ts-cli/ts_cli/tableau/lod.py`, the FIXED branch) to
+`[Order Date] = group_aggregate ( MAX([Order Date]) , {} , {} )`. BL-638 found that
+ThoughtSpot's SQL for a row compared with a whole-table `group_aggregate` is wrong
+(grouped on, the join fans out; filtered on, `first_value`/`last_value` partition by the
+period), and that the formula's form is not the cause. The Databricks converter now emits
+a scalar subquery instead (PR #770); the Tableau converter does not.
+
+**Not yet verified** that this exact Tableau form hits the defect: it follows from BL-638
+and was not re-probed.
+
+**Done when.** A live probe on a two-table fixture confirms or refutes the defect for the
+Tableau form; if confirmed, the converter emits a faithful form (a subquery needs the
+source table's FQN, which a Tableau datasource may not give) or skips with the reason.
