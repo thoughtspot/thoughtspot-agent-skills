@@ -1105,7 +1105,7 @@ formulas are added independently in Phase 2 via `build-model --existing-guid` **
 
 `--table-name-map` (optional, only when names differ): `{"twb_table": "ts_table"}`, or
 keyed by datasource when two published datasources both parse to `sqlproxy`; a target
-`{"name", "db_table"}` sets a display name (shapes: ts-cli README).
+`{"name", "db_table"}` sets a display name (shapes: ts-cli README; both forms need v0.230.0+).
 
 **Published/sqlproxy datasources bound to an existing table/view — reconcile columns.**
 When the datasource binds to a pre-existing ThoughtSpot table/view (the consultant/stand-in
@@ -1449,6 +1449,8 @@ ts tableau verify \
   --dir /tmp/ts_tableau_mig/output/{workbook_name}
 ```
 
+Add Step 5b's `--table-name-map`, if any.
+
 This aggregates every full Model TML's per-model report (`models[]` + `summary`) into one
 JSON on stdout, non-zero exit if ANY model has an ERROR, plus a human summary on stderr. How
 to act on it — **structural ERROR** (translatable formula/table/join dropped) is the gate:
@@ -1685,9 +1687,8 @@ Save `{parked_formulas}` (the remaining parked list) for Steps 12 and 12.5.
 
 Report validation warnings regardless of pace:
 - If `validation_warnings` is non-empty: surface warnings. Entries are not all about
-  formulas — an entry marked `kind: "join"` reports a join `_extract_joins` skipped
-  (its `name` is the datasource, not a formula), and belongs in the report's Join
-  warnings section. An entry without that marker is a formula that may have syntax
+  formulas — `kind: "join"`: *skipped* → Join warnings; *joined on the bare columns
+  without* a function → Formulas needing review, for approval (R1). An entry without that marker is a formula that may have syntax
   issues but was still attempted, or carries `review_notes` (assumed-Sunday weekday; week
   start, BL-334) — surface them; `review_required` ones go under Formulas needing review.
 
@@ -2513,6 +2514,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.49.0 | 2026-11-27 | `--table-name-map` keyed by datasource, with a separate display name; cast-wrapped relationship keys no longer invent joins (ts-cli v0.230.0). |
+| 1.49.0 | 2026-11-27 | `--table-name-map` keyed by datasource, with a display name; `verify` takes it too; wrapped relationship keys no longer invent joins (ts-cli v0.230.0). |
 
 **Older entries (v1.0.0–v1.47.3):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.

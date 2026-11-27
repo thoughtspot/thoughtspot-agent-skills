@@ -731,6 +731,7 @@ def _write_table_tml_files(
     Returns ``{"table_files": [...], "tables_written": N,
     "table_columns_unassigned": [...]}`` — the last key only for multi-table.
     """
+    from ts_cli.tableau.build_model import table_file_slug
     from ts_cli.tableau.tables import build_table_tml
     from ts_cli.tableau_translate import dump_tml_yaml
 
@@ -758,21 +759,16 @@ def _write_table_tml_files(
                 if key not in merged:
                     merged[key] = c
             t_cols = list(merged.values())
-        # Fix #C: forward the parser's own db_table (a dotted db.schema.table
-        # path — see twb.py._extract_tables) so build_table_tml can prefer it
-        # over re-slugging `name`. Matters when the table is a Tableau-
-        # assigned ALIAS for a physical table joined twice (`alias_of`,
-        # e.g. Ads Commercial Dashboard's `d_partner1` aliasing `d_partner`)
-        # — re-deriving from `name` there would slug the alias, a table name
-        # that does not exist in the warehouse.
+        # Fix #C: forward the parser's db_table (dotted db.schema.table) so
+        # build_table_tml prefers it over `name`: for an ALIAS of a table joined
+        # twice (`alias_of`, `d_partner1` of `d_partner`) the name is no warehouse table.
         table_dict = {"name": t["name"], "columns": t_cols, "db_table": t.get("db_table")}
         cmap = {c["name"]: c.get("db_column_name", c["name"]) for c in t_cols}
         obj, _dropped = build_table_tml(
             table_dict, connection_name, database, schema,
             column_map={t["name"]: cmap},
         )
-        table_slug = re.sub(r"[^a-z0-9]+", "_", t["name"].lower()).strip("_") or "table"
-        t_path = out_path / f"{table_slug}.table.tml"
+        t_path = out_path / f"{table_file_slug(t['name'])}.table.tml"
         t_path.write_text(dump_tml_yaml(obj))
         typer.echo(f"  Wrote Table: {t_path}", err=True)
         paths.append(str(t_path))
@@ -992,13 +988,15 @@ def _generate_flow(
 
 def _load_table_name_map(
     table_name_map: Optional[str], existing_guid: Optional[str], ds_names: list[str],
+    datasources: list[dict],
 ) -> dict[str, dict]:
     """Load --table-name-map as ``{datasource or "": map}`` (see
-    build_model.resolve_table_name_maps); exits on a bad path or document.
+    build_model.resolve_table_name_maps); exits on a bad path or document, or on
+    targets that would merge two physical tables (table_name_map_conflicts).
     GENERATE mode only: merge mode ignores it, with a heads-up on stderr."""
     if not table_name_map:
         return {}
-    from ts_cli.tableau.build_model import read_table_name_maps
+    from ts_cli.tableau.build_model import read_table_name_maps, table_name_map_conflicts
     try:
         name_map = read_table_name_maps(table_name_map, ds_names)
     except ValueError as exc:
@@ -1010,6 +1008,10 @@ def _load_table_name_map(
             "(merge mode resolves tables from the existing model)",
             err=True,
         )
+    problems = [] if existing_guid else table_name_map_conflicts(datasources, name_map)
+    if problems:
+        typer.echo("\n".join(problems), err=True)
+        raise SystemExit(1)
     return name_map
 
 
@@ -1319,18 +1321,13 @@ def build_model_cmd(
             )
             raise SystemExit(1)
 
-    # Fix #B: shared across every datasource in THIS invocation so a physical
-    # table name declared by more than one datasource (a common Tableau
-    # pattern — several datasources copied from one connection, each used by
-    # a different set of worksheets) accumulates the union of referenced
-    # columns in its Table TML instead of the last datasource processed
-    # silently overwriting an earlier one's columns. See
-    # `_write_table_tml_files`'s docstring for the live-reproduced bug this
-    # closes (TableauSetControlUseCases.twbx "Sub-Category" XREF).
+    # Fix #B: shared across this invocation, so a table name several datasources
+    # declare gets the union of their columns, not the last one's (see
+    # `_write_table_tml_files`: TableauSetControlUseCases.twbx "Sub-Category" XREF).
     table_registry: dict = {}
     from ts_cli.tableau.build_model import table_name_map_for
     name_maps = _load_table_name_map(
-        table_name_map, existing_guid, [d["name"] for d in parsed["datasources"]])
+        table_name_map, existing_guid, [d["name"] for d in parsed["datasources"]], datasources)
 
     all_results = []
     for ds in datasources:
@@ -1539,6 +1536,9 @@ def verify_cmd(
         help="Directory of `build-model` output — verify every full Model TML "
              "(*.model.tml, excluding *.phase0.model.tml) in one call. Mutually "
              "exclusive with --model."),
+    table_name_map: Optional[str] = typer.Option(
+        None, "--table-name-map",
+        help="The map build-model was given: a table it renamed is not read as dropped."),
 ) -> None:
     """Diff a parsed Tableau workbook against its generated Model TML.
 
@@ -1551,9 +1551,6 @@ def verify_cmd(
     (advisory — see `ts_cli/tableau/verify.py`). Formula-tier classification
     is delegated to `ts_cli/tableau/classify.py`, so an untranslatable formula
     correctly absent from the model is never flagged as a drop.
-
-    Model<->table-TML dangling-reference checking is provided separately by
-    `ts tml lint --dir` and is intentionally out of scope here.
 
     With `--model`: verifies that single Model TML file, printing the full report
     as JSON to stdout (a human-readable summary to stderr). Exit code is non-zero
@@ -1576,10 +1573,12 @@ def verify_cmd(
     from ts_cli.tableau.verify import verify_conversion, verify_conversion_dir
 
     parsed = _load_json(Path(input_file), "Parse file")
+    ds_all = parsed.get("datasources") or []
+    maps = _load_table_name_map(table_name_map, None, [d["name"] for d in ds_all], ds_all)
 
     if model_file:
         model_tml = _load_yaml_tml(Path(model_file), "Model TML file")
-        report = verify_conversion(parsed, model_tml)
+        report = verify_conversion(parsed, model_tml, name_maps=maps)
         _print_verify_summary(report)
         print(json.dumps(report, indent=2))
         if not report["ok"]:
@@ -1588,7 +1587,7 @@ def verify_cmd(
 
     model_paths = _discover_dir_model_files(dir_)
     models = [(p, _load_yaml_tml(Path(p), f"Model TML file ({p})")) for p in model_paths]
-    agg = verify_conversion_dir(parsed, models)
+    agg = verify_conversion_dir(parsed, models, name_maps=maps)
     _print_verify_dir_summary(agg)
     print(json.dumps(agg, indent=2))
     if not agg["ok"]:

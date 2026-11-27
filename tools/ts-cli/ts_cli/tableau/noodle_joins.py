@@ -40,15 +40,16 @@ def _detail_id_count(view: dict) -> int:
 def _relationship_operand(op: str) -> tuple[str, Optional[str], Optional[str]]:
     """Split a relationship operand into ``(column, table, wrapper)``.
 
-    The operand is ``[<col> (<Table Name>)]``, or bare ``[<col>]`` for the
-    datasource's base table (table is None). Tableau can also wrap the reference
-    in one function call, ``INT([<col> (<Table Name>)])``; the wrapper is unwrapped
-    and returned so the caller can report it. Reading the wrapped text as a
-    reference made `INT` the column and the inner reference the table, which
-    invented a join between two tables that do not exist.
+    The operand is ``[<col> (<Table Name>)]``, or bare ``[<col>]`` when the
+    column's name was not disambiguated, so the text does not say its table
+    (table is None; BL-278). Tableau can also wrap the reference in one function
+    call, ``INT([<col> (<Table Name>)])``; the wrapper is unwrapped and returned
+    so the caller can report it. Reading the wrapped text as a reference made
+    `INT` the column and the inner reference the table, which invented a join
+    between two tables that do not exist. ``]]`` is Tableau's escaped ``]``.
 
-    Anything else (an expression, a literal) is not a reference: table is None,
-    so the caller skips the relationship as it skips a bare side.
+    Anything else (an expression, a literal, nested calls) is not a reference:
+    table is None, and the caller skips the relationship with a warning.
     """
     s = (op or "").strip()
     wrapper = None
@@ -58,7 +59,7 @@ def _relationship_operand(op: str) -> tuple[str, Optional[str], Optional[str]]:
     if not (s.startswith("[") and s.endswith("]")):
         return s, None, wrapper
     inner = s[1:-1]
-    if "[" in inner or "]" in inner:  # several references: an expression
+    if "[" in inner or "]" in inner.replace("]]", ""):  # several references
         return s, None, wrapper
     m = _REF_WITH_TABLE.match(inner)
     if not m:
@@ -86,8 +87,10 @@ def _extract_noodle_joins(
     a published datasource flattened to one ``sqlproxy`` table still carries the
     relationships between its server-side logical tables, and no model table
     exists to join. With no ``tables`` and no ``sql_views`` to check against,
-    nothing is dropped. A key wrapped in a function is joined on the bare column,
-    with a warning naming the wrapper.
+    nothing is dropped. A relationship whose table cannot be read from either
+    operand is skipped with a warning (BL-278). A key wrapped in a function is
+    joined on the bare column, with a warning that the join may match different
+    rows than the source.
     """
     grain = {v.get("name"): _detail_id_count(v) for v in sql_views}
     known = {t.get("name") for t in (tables or [])} | {v.get("name") for v in sql_views}
@@ -104,6 +107,18 @@ def _extract_noodle_joins(
     return joins, warnings
 
 
+def _skip_reason(lop: str, ltab: Optional[str], rop: str, rtab: Optional[str],
+                 known: set) -> Optional[str]:
+    """Why a relationship emits no join, or None when it joins two known tables."""
+    unknown = [t for t in (ltab, rtab) if t and known and t not in known]
+    if unknown:
+        return f"no table named {', '.join(repr(t) for t in unknown)} in this datasource"
+    if ltab and rtab:
+        return None
+    side = "both sides" if not (ltab or rtab) else (rop if ltab else lop)
+    return f"the table of {side} cannot be read from the relationship (BL-278)"
+
+
 def _relationship_join(
     rel: ET.Element, known: set, grain: dict,
 ) -> tuple[Optional[dict], Optional[str]]:
@@ -115,16 +130,13 @@ def _relationship_join(
     lop, rop = exprs[0].get("op", ""), exprs[1].get("op", "")
     lcol, ltab, lwrap = _relationship_operand(lop)
     rcol, rtab, rwrap = _relationship_operand(rop)
-    if not (ltab and rtab):
-        return None, None
-    unknown = [t for t in (ltab, rtab) if known and t not in known]
-    if unknown:
-        return None, (f"relationship {lop} = {rop} skipped: no table named "
-                      f"{', '.join(repr(t) for t in unknown)} in this datasource")
+    skipped = _skip_reason(lop, ltab, rop, rtab, known)
+    if skipped:
+        return None, f"relationship {lop} = {rop} skipped: {skipped}"
     wrappers = sorted({w for w in (lwrap, rwrap) if w})
-    warning = (f"relationship {lop} = {rop} joined on the bare columns: "
-               f"{', '.join(wrappers)}() around the key is not carried into the join"
-               if wrappers else None)
+    warning = (f"relationship {lop} = {rop} joined on the bare columns without "
+               f"{', '.join(wrappers)}(): the join can match different rows than "
+               "Tableau's, so review it before import" if wrappers else None)
     # MANY side = finer grain (more detail id columns). Orient left=MANY, right=ONE.
     if grain.get(rtab, 0) > grain.get(ltab, 0):   # right is finer → right is MANY → swap
         ltab, rtab, lcol, rcol = rtab, ltab, rcol, lcol

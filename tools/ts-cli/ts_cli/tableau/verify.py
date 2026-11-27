@@ -490,7 +490,9 @@ def check_limitation_coverage(tiers: dict[str, str]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def verify_conversion_dir(parsed: dict, models: list[tuple[str, dict]]) -> dict:
+def verify_conversion_dir(
+    parsed: dict, models: list[tuple[str, dict]], name_maps: Optional[dict] = None,
+) -> dict:
     """Aggregate ``verify_conversion`` across every model in a `build-model` output
     directory — backs ``ts tableau verify --dir`` (one call instead of one per model).
 
@@ -511,7 +513,7 @@ def verify_conversion_dir(parsed: dict, models: list[tuple[str, dict]]) -> dict:
     models_with_errors: list[str] = []
 
     for label, model_tml in models:
-        report = verify_conversion(parsed, model_tml)
+        report = verify_conversion(parsed, model_tml, name_maps=name_maps)
         per_model.append({"model_file": label, **report})
         total_errors += report["summary"]["errors"]
         total_warnings += report["summary"]["warnings"]
@@ -530,7 +532,7 @@ def verify_conversion_dir(parsed: dict, models: list[tuple[str, dict]]) -> dict:
     }
 
 
-def verify_conversion(parsed: dict, model_tml: dict) -> dict:
+def verify_conversion(parsed: dict, model_tml: dict, name_maps: Optional[dict] = None) -> dict:
     """Diff a parsed Tableau workbook against the generated Model TML.
 
     ``parsed`` is a ``ts tableau parse`` output (``{"datasources": [...]}``)
@@ -543,6 +545,11 @@ def verify_conversion(parsed: dict, model_tml: dict) -> dict:
     ``ts tml lint --dir`` (``lint_cross_references``) and is intentionally
     out of scope here.
 
+    ``name_maps`` is build-model's ``--table-name-map`` as
+    ``resolve_table_name_maps`` returns it: the parse's tables are renamed as
+    build-model renamed them, so a mapped table is compared under its new name
+    and still reads as dropped when the Model lacks that name.
+
     Returns ``{"ok": bool, "checks": [...], "summary": {...}}`` — ``ok`` is
     False iff any check carries an ERROR-severity finding.
     """
@@ -552,6 +559,9 @@ def verify_conversion(parsed: dict, model_tml: dict) -> dict:
     if isinstance(parsed, dict) and parsed.get("datasources"):
         disambiguate_sql_view_names(parsed["datasources"])
     ds = _pick_datasource(parsed or {}, model.get("name", ""))
+    if name_maps:
+        from ts_cli.tableau.build_model import apply_table_name_map, table_name_map_for
+        ds, _ = apply_table_name_map(ds, {}, table_name_map_for(name_maps, ds.get("name", "")))
 
     classified = classify_formulas(
         ds.get("calculated_fields", []), orphan_calcs=set(ds.get("orphan_calcs", [])))

@@ -171,6 +171,43 @@ def table_name_map_for(maps: dict[str, dict], datasource_name: str) -> dict | No
     return {**maps.get("", {}), **maps.get(datasource_name, {})}
 
 
+def table_file_slug(name: str) -> str:
+    """The stem of the ``<slug>.table.tml`` file build-model writes a Table to."""
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "table"
+
+
+def table_name_map_conflicts(datasources: list[dict], maps: dict[str, dict]) -> list[str]:
+    """Map targets that would put two physical tables under one ThoughtSpot Table.
+
+    build-model writes one Table per table name (one ``<slug>.table.tml``, one
+    ``obj_id``, columns merged across datasources) and a Model binds to its tables
+    by name, so two names that slug alike, or one name over two ``db_table``s,
+    become one Table and one datasource's Model reads the other's physical
+    table, with no error. Before display names, a mapped name always was its
+    ``db_table``. Only groups holding a mapped table are checked: unmapped tables
+    that share a name are the existing cross-datasource column merge.
+    Returns one message per conflicting file; empty when there is none.
+    """
+    claims: dict[str, list[tuple]] = {}
+    for ds in datasources:
+        name_map = table_name_map_for(maps, ds.get("name", "")) or {}
+        for t in ds.get("tables", []):
+            target = _table_target(name_map[t["name"]]) if t["name"] in name_map else None
+            name = target["name"] if target else t["name"]
+            db = (target or {}).get("db_table") or t.get("db_table") or t["name"]
+            claims.setdefault(table_file_slug(name), []).append(
+                (name, db, ds.get("name", ""), t["name"], target is not None))
+    problems = []
+    for slug, group in claims.items():
+        if any(c[4] for c in group) and len({(c[0], c[1].upper()) for c in group}) > 1:
+            who = "; ".join(f"datasource {c[2]!r} table {c[3]!r} -> {c[0]!r} over {c[1]!r}"
+                            for c in group)
+            problems.append(f"--table-name-map would write two physical tables to one "
+                            f"ThoughtSpot table ({slug}.table.tml): {who}. "
+                            "Give each physical table its own name.")
+    return problems
+
+
 def apply_table_name_map(
     ds: dict,
     scoped_columns: dict[str, str],

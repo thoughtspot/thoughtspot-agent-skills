@@ -18,8 +18,10 @@ from ts_cli.cli import app
 from ts_cli.tableau.build_model import (
     apply_table_name_map,
     resolve_table_name_maps,
+    table_name_map_conflicts,
     table_name_map_for,
 )
+from ts_cli.tableau.verify import verify_conversion
 from ts_cli.tableau.noodle_joins import _extract_noodle_joins, _relationship_operand
 
 DS_A = "orders_a | Project : Data Sources"
@@ -117,6 +119,8 @@ def test_string_target_still_sets_both():
     ("INT([ID])", ("ID", None, "INT")),
     ("INT([ID (Custom SQL Query6)])", ("ID", "Custom SQL Query6", "INT")),
     ("[A] + [B]", ("[A] + [B]", None, None)),
+    ("[A]]B (Q1)]", ("A]]B", "Q1", None)),
+    ("INT(STR([ID (Q1)]))", ("INT(STR([ID (Q1)]))", None, None)),
 ])
 def test_relationship_operand(op, expected):
     assert _relationship_operand(op) == expected
@@ -131,12 +135,34 @@ def _rels(*pairs):
 
 
 def test_cast_key_to_the_base_table_invents_no_join():
-    # The published-datasource shape: the base side is bare, so no join.
+    # The published-datasource shape: flattened to sqlproxy, so neither
+    # relationship has a table to join, and each is reported.
     # The cast form used to read as column INT on a table named [ORDER_ID].
     ds = _rels(("INT([ORDER_ID])", "INT([ORDER_ID (Custom SQL Query6)])"),
                ("[ORDER_ID]", "[ORDER_ID (Custom SQL Query2)]"))
     joins, warnings = _extract_noodle_joins(ds, [], [{"name": "sqlproxy"}])
-    assert joins == [] and warnings == []
+    assert joins == []
+    assert len(warnings) == 2
+    assert "'Custom SQL Query6'" in warnings[0] and "'Custom SQL Query2'" in warnings[1]
+
+
+@pytest.mark.parametrize("left, right", [
+    ("[Region]", "[Region (People)]"),
+    ('DATETRUNC(&quot;month&quot;, [TS (Q1)])', "[M (Q2)]"),
+    ("INT(STR([ID (Q1)]))", "[ID (Q2)]"),
+])
+def test_relationship_whose_table_cannot_be_read_is_skipped_with_a_warning(left, right):
+    # A skipped relationship leaves a table unjoined, which import rejects;
+    # the warning says which relationship was lost (BL-278).
+    joins, warnings = _extract_noodle_joins(_rels((left, right)), [], [])
+    assert joins == []
+    assert len(warnings) == 1 and "cannot be read" in warnings[0] and "BL-278" in warnings[0]
+
+
+def test_escaped_bracket_in_a_column_name_still_joins():
+    joins, warnings = _extract_noodle_joins(_rels(("[A]]B (Q1)]", "[A]]B (Q2)]")), [], [])
+    assert [(j["left_table"], j["right_table"]) for j in joins] == [("Q1", "Q2")]
+    assert warnings == []
 
 
 def test_relationship_to_a_table_the_datasource_lacks_is_dropped_and_reported():
@@ -152,6 +178,7 @@ def test_cast_key_between_known_tables_joins_on_the_columns_and_says_so():
     assert [(j["left_table"], j["right_table"], j["keys"]) for j in joins] == [
         ("Q1", "Q2", [{"left": "ID", "right": "ID"}])]
     assert len(warnings) == 1 and "INT()" in warnings[0]
+    assert "different rows" in warnings[0] and "review" in warnings[0]
 
 
 def test_plain_relationship_between_known_tables_is_unchanged():
@@ -243,3 +270,126 @@ def test_build_model_refuses_a_map_naming_an_unknown_datasource(tmp_path):
         "--table-name-map", str(tmap), "--output-dir", str(tmp_path / "o"), "--dry-run"])
     assert res.exit_code == 1
     assert "not a datasource in this workbook" in res.stderr
+
+
+def test_parse_writes_a_dropped_relationship_to_join_warnings(tmp_path):
+    rels = ("<object-graph><relationships><relationship><expression op='='>"
+            "<expression op='INT([ORDER_ID])'/>"
+            "<expression op='INT([ORDER_ID (Custom SQL Query6)])'/>"
+            "</expression></relationship></relationships></object-graph>")
+    twb = tmp_path / "rel.twb"
+    twb.write_text(
+        "<?xml version='1.0' encoding='utf-8' ?><workbook version='18.1'><datasources>"
+        + _sqlproxy_ds(DS_A, "sqlproxy.aaa", ["ORDER_ID", "SALES"]).replace(
+            "</datasource>", rels + "</datasource>")
+        + "</datasources></workbook>")
+    out = tmp_path / "parsed.json"
+    res = CliRunner().invoke(app, ["tableau", "parse", str(twb), "-o", str(out)])
+    assert res.exit_code == 0, res.stdout + res.stderr
+    ds = json.loads(out.read_text())["datasources"][0]
+    assert ds["joins"] == []
+    assert any("'Custom SQL Query6'" in str(w) for w in ds["join_warnings"])
+
+
+# --- one ThoughtSpot table per physical table ---------------------------------
+
+def _two_ds(table_a="sqlproxy", table_b="sqlproxy"):
+    return [{"name": DS_A, "tables": [{"name": table_a, "db_table": table_a}]},
+            {"name": DS_B, "tables": [{"name": table_b, "db_table": table_b}]}]
+
+
+@pytest.mark.parametrize("raw", [
+    # one display name over two physical tables
+    {DS_A: {"sqlproxy": {"name": "Orders", "db_table": "ORDERS_EU"}},
+     DS_B: {"sqlproxy": {"name": "Orders", "db_table": "ORDERS_US"}}},
+    # two names that slug to one file
+    {DS_A: {"sqlproxy": {"name": "Orders A", "db_table": "ORDERS_A"}},
+     DS_B: {"sqlproxy": "ORDERS_A_"}},
+])
+def test_two_physical_tables_under_one_table_name_conflict(raw):
+    maps = resolve_table_name_maps(raw, [DS_A, DS_B])
+    problems = table_name_map_conflicts(_two_ds(), maps)
+    assert len(problems) == 1 and DS_A in problems[0] and DS_B in problems[0]
+
+
+def test_display_name_equal_to_another_datasources_unmapped_table_conflicts():
+    maps = resolve_table_name_maps(
+        {DS_A: {"sqlproxy": {"name": "ORDERS", "db_table": "ORDERS_V2"}}}, [DS_A, DS_B])
+    assert table_name_map_conflicts(_two_ds(table_b="ORDERS"), maps)
+
+
+@pytest.mark.parametrize("raw", [
+    {DS_A: {"sqlproxy": {"name": "Orders", "db_table": "ORDERS"}},
+     DS_B: {"sqlproxy": {"name": "Orders", "db_table": "orders"}}},   # one physical table
+    {DS_A: {"sqlproxy": "ORDERS_A"}, DS_B: {"sqlproxy": "ORDERS_B"}},
+])
+def test_one_name_per_physical_table_is_no_conflict(raw):
+    maps = resolve_table_name_maps(raw, [DS_A, DS_B])
+    assert table_name_map_conflicts(_two_ds(), maps) == []
+
+
+def test_unmapped_tables_sharing_a_name_are_not_checked():
+    # The existing cross-datasource column merge; the map did not cause it.
+    ds = _two_ds()
+    ds[1]["tables"][0]["db_table"] = "OTHER"
+    assert table_name_map_conflicts(ds, resolve_table_name_maps({}, [DS_A, DS_B])) == []
+
+
+def test_build_model_refuses_one_display_name_over_two_physical_tables(tmp_path):
+    tmap = tmp_path / "map.json"
+    tmap.write_text(json.dumps({
+        DS_A: {"sqlproxy": {"name": "Orders", "db_table": "ORDERS_EU"}},
+        DS_B: {"sqlproxy": {"name": "Orders", "db_table": "ORDERS_US"}},
+    }))
+    out = tmp_path / "out"
+    res = CliRunner().invoke(app, [
+        "tableau", "build-model", str(_twb(tmp_path)), "--connection", "CONN",
+        "--table-name-map", str(tmap), "--output-dir", str(out)])
+    assert res.exit_code == 1
+    assert "two physical tables to one ThoughtSpot table (orders.table.tml)" in res.stderr
+    assert not list(out.glob("*.tml"))
+
+
+# --- ts tableau verify reads the map -------------------------------------------
+
+def _parsed_one(table="sqlproxy"):
+    return {"datasources": [{"name": DS_A, "tables": [{"name": table, "db_table": table}],
+                             "columns": [], "joins": [], "calculated_fields": []}]}
+
+
+def _model(*names):
+    return {"model": {"name": "orders_a", "model_tables": [{"name": n} for n in names],
+                      "columns": [], "formulas": []}}
+
+
+def _table_errors(report):
+    structural = next(c for c in report["checks"] if c["name"] == "structural")
+    return [f["message"] for f in structural["findings"] if f["severity"] == "ERROR"]
+
+
+def test_verify_reads_a_mapped_table_as_renamed_not_dropped():
+    maps = resolve_table_name_maps(
+        {DS_A: {"sqlproxy": {"name": "Orders A", "db_table": "ORDERS_A"}}}, [DS_A])
+    assert any("sqlproxy" in m for m in _table_errors(
+        verify_conversion(_parsed_one(), _model("Orders A"))))
+    assert not _table_errors(verify_conversion(_parsed_one(), _model("Orders A"), name_maps=maps))
+
+
+def test_verify_with_a_map_still_fires_on_a_genuine_drop():
+    maps = resolve_table_name_maps(
+        {DS_A: {"sqlproxy": {"name": "Orders A", "db_table": "ORDERS_A"}}}, [DS_A])
+    errors = _table_errors(verify_conversion(_parsed_one(), _model("Something Else"), name_maps=maps))
+    assert any("Orders A" in m for m in errors)
+
+
+def test_verify_cli_accepts_the_table_name_map(tmp_path):
+    parsed = tmp_path / "parsed.json"
+    parsed.write_text(json.dumps(_parsed_one()))
+    model = tmp_path / "m.model.tml"
+    model.write_text(yaml.safe_dump(_model("Orders A")))
+    tmap = tmp_path / "map.json"
+    tmap.write_text(json.dumps({DS_A: {"sqlproxy": {"name": "Orders A", "db_table": "ORDERS_A"}}}))
+    args = ["tableau", "verify", "--parse", str(parsed), "--model", str(model)]
+    assert CliRunner().invoke(app, args).exit_code == 1
+    res = CliRunner().invoke(app, args + ["--table-name-map", str(tmap)])
+    assert "dropped" not in res.stdout, res.stdout

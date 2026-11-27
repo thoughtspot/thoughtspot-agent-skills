@@ -2478,7 +2478,10 @@ nested entry under a key that names no datasource is refused, listing the names.
 To give the ThoughtSpot table a readable name over the physical table, use an object:
 `{"sqlproxy": {"name": "Orders", "db_table": "ORDERS"}}`. Joins, `column_id`s and
 formula scopes take the `name`; `fqn` and the Table's `db_table` take the `db_table`. A
-target with only `name` keeps the parsed `db_table`. Implemented by
+target with only `name` keeps the parsed `db_table`. build-model writes one Table per
+name, so a map that would put two physical tables under one name (or two names that
+make the same `<slug>.table.tml`) is refused before anything is written. Pass the same
+map to `ts tableau verify`, or a mapped table reads as dropped. Implemented by
 `resolve_table_name_maps()` / `table_name_map_for()` in the same module.
 
 **SQL View emission and name disambiguation:** each Custom SQL relation
@@ -2821,6 +2824,7 @@ ts tableau verify --parse parsed.json --model out/orders.model.tml
 |---|---|---|
 | `--parse`, `--input`, `-i` | yes | `ts tableau parse` output JSON (`--input` accepted as an alias, matching `build-liveboard`'s convention) |
 | `--model`, `-m` | yes | The generated `*.model.tml` file to verify |
+| `--table-name-map` | no | The map `build-model` was given: the parse's tables are renamed as build-model renamed them, so a mapped table is not read as dropped (and still is when the Model lacks its new name) |
 
 Runs four checks (implemented in `ts_cli/tableau/verify.py::verify_conversion`, pure —
 no Tableau/ThoughtSpot connection):
