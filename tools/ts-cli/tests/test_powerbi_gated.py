@@ -390,19 +390,31 @@ def test_build_model_refuses_a_gated_calculated_column():
 
 
 def test_deep_nesting_refuses_instead_of_raising():
-    src = "CALCULATE(" * 3000 + "DISTINCTCOUNT(Fact[k])" + ", NOT ISBLANK(Fact[g]))" * 3000
+    """1,200 levels pass Python's default recursion limit of 1,000 (BL-611 item 4: 3,000 took 13s)."""
+    src = "CALCULATE(" * 1200 + "DISTINCTCOUNT(Fact[k])" + ", NOT ISBLANK(Fact[g]))" * 1200
     assert translate(src, "Fact") == (None, None, None)
     assert _t(src)[1] == "NEEDS REVIEW"
 
 
 def test_value_set_is_linear():
-    """Round-5 review: slicing per member made 64k members take 3s. Generous bound."""
+    """Round-5 review: slicing per member made 64k members take 3s. Compares n members
+    with 2n rather than a fixed bound, which a slow runner fails on correct code and a
+    fast one passes with the quadratic code back (BL-611 item 4). Linear doubles the
+    time; quadratic quadruples it. Best of three, to ride out a busy machine."""
     import time
-    src = ('CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] IN {' + ", ".join(['"a"'] * 100_000)
-           + "})")
-    t0 = time.monotonic()
-    translate(src, "Fact")
-    assert time.monotonic() - t0 < 10
+
+    def secs(n):
+        src = ('CALCULATE(DISTINCTCOUNT(Fact[k]), Fact[s] IN {' + ", ".join(['"a"'] * n)
+               + "})")
+        best = float("inf")
+        for _ in range(3):
+            t0 = time.monotonic()
+            translate(src, "Fact")
+            best = min(best, time.monotonic() - t0)
+        return best
+
+    small, big = secs(20_000), secs(40_000)
+    assert big / small < 3.2, f"{big:.2f}s for 40k vs {small:.2f}s for 20k"
 
 
 def test_note_says_when_the_two_forms_differ():

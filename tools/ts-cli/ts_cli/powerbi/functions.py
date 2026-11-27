@@ -9,6 +9,7 @@ ROUND-increment semantics; 2-arg CEILING/FLOOR; DATE subtraction -> diff_days.
 """
 from __future__ import annotations
 
+import bisect
 import re
 
 from ts_cli.formula_common import sql_digits_to_ts_increment, wrap_passthrough_calls
@@ -183,6 +184,64 @@ def _opaque_end(s: str, i: int) -> int:
     return n
 
 
+def _opaque_spans(s: str, protect: str = "\"'["):
+    """``(start, end)`` of each span in ``s`` opened by a character in ``protect``: a
+    "string", a 'table name' or a [column]/[reference].
+
+    The scan always steps over all three openings (so a ``'`` inside ``[Bob's col]`` is
+    not read as a quote) and reports only the ones asked for, because the passes below
+    protect different subsets: a bare-``[name]`` rewrite has to see brackets while
+    skipping literals, and an operator rewrite has to skip both."""
+    spans, i, n = [], 0, len(s)
+    while i < n:
+        if s[i] in "\"'[":
+            j = _opaque_end(s, i)
+            if s[i] in protect:
+                spans.append((i, j))
+            i = j
+        else:
+            i += 1
+    return spans
+
+
+def _inside_span(spans, starts, pos: int) -> bool:
+    """True when ``pos`` falls in one of the ``_opaque_spans`` ``spans`` (``starts`` is
+    their start offsets). Bisected, not scanned, so N literals and N matches cost
+    N log N, not N*N."""
+    k = bisect.bisect_right(starts, pos) - 1
+    return k >= 0 and pos < spans[k][1]
+
+
+def _sub_outside(pattern, repl, s: str, protect: str = "\"'["):
+    """``pattern.sub(repl, s)`` with every match that STARTS inside an ``_opaque_spans``
+    span left as written.
+
+    Every whole-text rewrite in ``translate_dax`` goes through this or
+    ``_finditer_outside``. A regex run over the whole expression reaches inside a string
+    literal and a column name, and each such rewrite changes what the formula MEANS:
+    ``"a && b"`` compared as ``'a and b'``, ``"[Amount]"`` as ``'[Fact::Amount]'``,
+    ``T[NOT]`` read as ``[T::not]`` (BL-611). The pattern still runs against the whole
+    string, so a lookaround sees the character on the other side of a span's edge."""
+    spans = _opaque_spans(s, protect)
+    starts = [a for a, _b in spans]
+
+    def _one(m):
+        if _inside_span(spans, starts, m.start()):
+            return m.group(0)
+        return repl(m) if callable(repl) else m.expand(repl)
+
+    return pattern.sub(_one, s)
+
+
+def _finditer_outside(pattern, s: str, protect: str = "\"'["):
+    """``pattern.finditer(s)`` with every match starting inside an ``_opaque_spans``
+    span dropped. Offsets are into ``s``, so a caller can slice around them."""
+    spans = _opaque_spans(s, protect)
+    starts = [a for a, _b in spans]
+    return [m for m in pattern.finditer(s)
+            if not _inside_span(spans, starts, m.start())]
+
+
 def _split_args(s):
     """Split a function-call argument string on top-level commas (respecting
     nested parens, brackets and braces, and skipping quoted text). Returns the list of
@@ -283,49 +342,6 @@ def _split_reads_differently(s: str) -> bool:
     return False
 
 
-def _legacy_split_args(s):
-    """``main``'s argument splitter before this change, kept only so
-    ``_legacy_reads_differently`` can tell which calls it read differently: it counts
-    ``(`` ``[`` and ``)`` ``]`` as depth everywhere, and tracks neither braces nor quoted text."""
-    args, depth, cur = [], 0, []
-    for ch in s:
-        if ch in "([":
-            depth += 1
-        elif ch in ")]":
-            depth -= 1
-        if ch == "," and depth == 0:
-            args.append("".join(cur).strip())
-            cur = []
-        else:
-            cur.append(ch)
-    if cur or args:
-        args.append("".join(cur).strip())
-    return args
-
-
-def _legacy_match_paren(s, open_idx):
-    """``main``'s paren matcher before this change (see ``_legacy_split_args``)."""
-    depth = 0
-    for i in range(open_idx, len(s)):
-        if s[i] == "(":
-            depth += 1
-        elif s[i] == ")":
-            depth -= 1
-            if depth == 0:
-                return i
-    return -1
-
-
-class _LegacyMisread(Exception):
-    """Raised by ``_expand_calls`` when the legacy splitter would have read the call it is
-    about to split differently from the quote- and brace-aware one."""
-
-
-_LEGACY_MISREAD_REASON = (
-    "a call holds an IN set, or a string or name with a comma, paren or bracket, which the "
-    "translator's rewrites do not yet read safely (BL-611); rebuild by hand")
-
-
 def _string_literals(src: str) -> list[str]:
     """Every "string" literal in ``src``, in order, skipping 'table names' and [columns]
     (a ``"`` inside ``T[a"b]`` is part of the name, which a bare regex would misread)."""
@@ -339,24 +355,6 @@ def _string_literals(src: str) -> list[str]:
         else:
             i += 1
     return out
-
-
-def _legacy_reads_differently(expr: str, open_idx: int, close: int) -> bool:
-    """True when ``main``'s legacy pair would read the call opening at ``open_idx`` (and
-    closing at ``close`` per the new pair) differently: another closing paren, or other
-    arguments.
-
-    The legacy splitter mis-split any call holding an IN set's commas or a ``,`` ``(``
-    ``)`` inside a string, and that mis-split refused the whole measure. The rewrites after
-    the split (operator and whitespace normalisation, home-column and measure-reference
-    qualification) were written against that safety net and still reach inside quoted
-    text, so a call the legacy pair misreads stays NEEDS REVIEW, as on main. Checked at the
-    split itself, on the text being split, so a call main never split is not refused and a
-    call synthesised by an earlier expansion is checked too. Lifting this is BL-611's job."""
-    if _legacy_match_paren(expr, open_idx) != close:
-        return True
-    body = expr[open_idx + 1:close]
-    return _split_args(body) != _legacy_split_args(body)
 
 
 def _calc_approx(args):
@@ -414,7 +412,8 @@ def _refs_to_ids(dax, names, physical_cols=None):
             out = _sub_col_refs(out, lambda _t, c, name=name:
                                 f"[formula_{name}]" if c == name else None)
             pat = re.compile(r"\[" + re.escape(name) + r"\]")
-        out = pat.sub("[formula_" + name + "]", out)
+        out = _sub_outside(pat, lambda _m, name=name: "[formula_" + name + "]", out,
+                           protect="\"'")
     return out
 
 
@@ -482,10 +481,18 @@ def _apply_calculate_rewrites(src, measure_dax, physical_cols=None):
     """id-refs + group_aggregate + sum_if rewrites, run before the review check.
     Returns (src, note_bits). See _refs_to_ids / _calc_all_to_group_agg / _approx_calculate."""
     note_bits = []
+    # Both CALCULATE rewrites below are lossy by construction (BL-609), and were written
+    # against a splitter that could not read a measure holding an IN set or a , ( ) inside
+    # quoted text, which main therefore refused. Read over the WHOLE measure, not only the
+    # CALCULATE body: an IN set beside the CALCULATE (`IF(x IN {...}, CALCULATE(a / b, ...))`)
+    # otherwise let the rewrite keep only the numerator.
+    unreadable = _split_reads_differently(src)
     # Sibling measure/calc-column refs -> [formula_<name>] id-refs (keeps the dependency
     # graph; TS resolves siblings by id, not display name).
     if measure_dax:
         src = _refs_to_ids(src, set(measure_dax), physical_cols)
+    if unreadable:
+        return src, note_bits
     # CALCULATE(m, ALL(col), ...) -> group_aggregate removing those dims (cluster-verified).
     ga = _calc_all_to_group_agg(src)
     if ga != src:
@@ -499,12 +506,16 @@ def _apply_calculate_rewrites(src, measure_dax, physical_cols=None):
     return src, note_bits
 
 
+_VAR_KEYWORD = re.compile(r"\bvar\b", re.I)
+_RETURN_KEYWORD = re.compile(r"\breturn\b", re.I)
+
+
 def _review_reason(src):
     """A NEEDS-REVIEW reason if src still holds a filter-context / time-intelligence /
     iterator construct (no 1:1 ThoughtSpot formula), else None."""
-    funcs = [m.group(1).lower() for m in _FUNC_CALL.finditer(src)]
+    funcs = [m.group(1).lower() for m in _finditer_outside(_FUNC_CALL, src)]
     bad = sorted({f for f in funcs if f in _DAX_REVIEW})
-    if re.search(r"\bvar\b", src, re.I) and re.search(r"\breturn\b", src, re.I):
+    if _finditer_outside(_VAR_KEYWORD, src) and _finditer_outside(_RETURN_KEYWORD, src):
         bad.append("VAR/RETURN")
     if bad:
         return ("contains " + ", ".join(sorted(set(bad))) +
@@ -549,18 +560,25 @@ def plain_int64(text: str) -> bool:
             and -2 ** 63 <= int(t) <= 2 ** 63 - 1)
 
 
+_DAX_OPERATORS = re.compile(r"<>|&&|\|\||\bNOT\b")
+_DAX_OPERATOR_TEXT = {"<>": "!=", "&&": " and ", "||": " or ", "NOT": "not"}
+_LONE_AMP = re.compile(r"(?<![&])&(?![&])")
+_CONCATENATE = re.compile(r"\bCONCATENATE\s*\(", re.I)
+
+
 def _normalize_operators(expr):
     """DAX string literals + operators -> ThoughtSpot. Returns (expr, concat_note|None)."""
     # DAX "double" string literals ("" is an embedded quote) -> SQL-standard 'single',
     # printed in ThoughtSpot's exact form at the end by ts_finalize_formula (BL-365).
-    expr = DAX_STRING.sub(lambda m: sql_std_literal(dax_string_value(m)), expr)
-    expr = expr.replace("<>", "!=")
-    expr = expr.replace("&&", " and ").replace("||", " or ")
-    expr = re.sub(r"\bNOT\b", "not", expr)
+    # Every rewrite here skips quoted text and [names] (BL-611): `"a && b"` is a value,
+    # and `T[NOT]` names a column. A `"` inside a [name] or a 'table' opens no literal.
+    expr = _sub_outside(DAX_STRING, lambda m: sql_std_literal(dax_string_value(m)), expr,
+                        protect="'[")
+    expr = _sub_outside(_DAX_OPERATORS, lambda m: _DAX_OPERATOR_TEXT[m.group(0)], expr)
     # a & b string concat is non-trivial; flag if a lone & remains.
     concat_note = ("string '&' concatenation left as-is; verify (use concat())"
-                   if re.search(r"(?<![&])&(?![&])", expr) else None)
-    expr = re.sub(r"\bCONCATENATE\s*\(", "concat(", expr, flags=re.I)
+                   if _finditer_outside(_LONE_AMP, expr) else None)
+    expr = _sub_outside(_CONCATENATE, lambda _m: "concat(", expr)
     return expr, concat_note
 
 
@@ -586,12 +604,15 @@ def _map_known_functions(expr):
         unknown.append(m.group(1))
         return m.group(1) + "("
 
-    expr = _FUNC_CALL.sub(_rename, expr)
+    expr = _sub_outside(_FUNC_CALL, _rename, expr)
     if unknown:
         return None, "unmapped function(s): " + ", ".join(sorted(set(unknown)))
     for sent, kw in _SENTINELS:              # restore synthesized keywords/functions
         expr = expr.replace(sent, kw)
     return expr, None
+
+
+_BRACKET_REF = re.compile(r"\[([^\]]+)\]")
 
 
 def _qualify_home_and_dates(expr, home_table, home_cols, date_cols):
@@ -603,18 +624,33 @@ def _qualify_home_and_dates(expr, home_table, home_cols, date_cols):
             if "::" in inner or inner not in home_cols:
                 return m.group(0)
             return f"[{home_table}::{inner}]"
-        expr = re.sub(r"\[([^\]]+)\]", _qual, expr)
+        expr = _sub_outside(_BRACKET_REF, _qual, expr, protect="\"'")
     if date_cols:
         dpat = re.compile(r"\[([^\]]+)\]\s*-\s*\[([^\]]+)\]")
         def _diff(m):
             a, b = m.group(1), m.group(2)
             return f"diff_days([{a}], [{b}])" if a in date_cols and b in date_cols else m.group(0)
         for _ in range(6):
-            new = dpat.sub(_diff, expr)
+            new = _sub_outside(dpat, _diff, expr, protect="\"'")
             if new == expr:
                 break
             expr = new
     return expr
+
+
+_RUN_OF_SPACE = re.compile(r"\s+")
+
+
+def _bracket_name_reason(src: str):
+    """A NEEDS-REVIEW reason when a [column] or 'table' name holds a bracket (``T[a]]b]``,
+    ``T[a[b]``, ``'T]'[c]``), else None. ThoughtSpot's ``[Table::Column]`` has no escape
+    for one, so the reference would be emitted broken; main refused these too, because its
+    splitter misread them."""
+    for a, b in _opaque_spans(src, "'["):
+        body = src[a + 1:b - 1]
+        if "[" in body or "]" in body:
+            return "a column or table name holds a [ or ]; rebuild by hand"
+    return None
 
 
 def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_dax=None,
@@ -648,13 +684,14 @@ def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_
         from ts_cli.powerbi.gated import translate as _translate_gated
         g_expr, g_status, g_note = (_translate_gated(src, home_table) if is_measure
                                     else (None, None, None))
-        # The reference rewrite above reaches inside quoted text (BL-611): a literal it
-        # changed ("[Revenue]" -> "[formula_Revenue]") would be emitted as the wrong value.
+        # Guard: a literal the rewrites above changed ("[Revenue]" -> "[formula_Revenue]")
+        # would be emitted as the wrong value. They skip quoted text since BL-611; this
+        # keeps the gated path safe should one stop doing so.
         if g_expr and _string_literals(src) == literals:
             return g_expr, g_status, g_note
         return None, "NEEDS REVIEW", reason
     from ts_cli.powerbi.in_sets import in_set_reason
-    reason = in_set_reason(src)
+    reason = in_set_reason(src) or _bracket_name_reason(src)
     if reason:
         return None, "NEEDS REVIEW", reason
 
@@ -662,10 +699,7 @@ def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_
     # "else" keywords those introduce are never mistaken for a table name.
     expr = _sub_col_refs(src, lambda t, c: f"[{t.strip()}::{c.strip()}]")
 
-    try:
-        expr = _expand_functions(expr)
-    except _LegacyMisread:
-        return None, "NEEDS REVIEW", _LEGACY_MISREAD_REASON
+    expr = _expand_functions(expr)
     if expr is None:
         return None, "NEEDS REVIEW", "could not expand a DIVIDE/IF/OR/AND/ROUND/CEILING/FLOOR call"
 
@@ -692,7 +726,7 @@ def translate_dax(dax, home_table=None, home_cols=None, date_cols=None, measure_
               "pass-through)")
 
     expr = _qualify_home_and_dates(expr, home_table, home_cols, date_cols)
-    expr = re.sub(r"\s+", " ", expr).strip()
+    expr = _sub_outside(_RUN_OF_SPACE, lambda _m: " ", expr).strip()   # not inside text (BL-611)
     # string literals into ThoughtSpot's exact form; `a * b / c` bracketed (BL-365)
     expr = ts_finalize_formula(expr)
     status = "Approximated" if note_bits else status_floor
@@ -711,15 +745,13 @@ def _expand_calls(expr, fname, repl_fn):
             return None
         # find the LAST occurrence so inner calls (later in string for same-name
         # nesting) resolve first when we go right-to-left.
-        matches = list(pat.finditer(expr))
+        matches = _finditer_outside(pat, expr)
         if not matches:
             return expr
         m = matches[-1]
         close = _match_paren(expr, m.end() - 1)
         if close < 0:
             return None
-        if _legacy_reads_differently(expr, m.end() - 1, close):
-            raise _LegacyMisread()
         args = _split_args(expr[m.end():close])
         repl = repl_fn(args)
         if repl is None:

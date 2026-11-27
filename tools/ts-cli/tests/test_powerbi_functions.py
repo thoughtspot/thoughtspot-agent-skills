@@ -303,13 +303,13 @@ def test_quoted_text_is_not_argument_structure(dax, expected):
 
 
 @pytest.mark.parametrize("dax", ['IF(T[s] = "a,b", 1, 0)', 'IF(T[s] = "a)b", 1, 0)'])
-def test_text_the_legacy_splitter_misread_stays_needs_review_as_on_main(dax):
-    """The quote-aware splitter reads these correctly, but the rewrites after it still
-    reach inside strings (BL-611), so a measure the legacy splitter misread stays NEEDS
-    REVIEW, as on main."""
-    expr, status, note = translate_dax(dax)
-    assert (expr, status) == (None, "NEEDS REVIEW")
-    assert "BL-611" in note
+def test_text_the_legacy_splitter_misread_translates_with_the_literal_as_written(dax):
+    """The quote-aware splitter reads these correctly, and no rewrite reaches inside the
+    string any more (BL-611), so the measure translates with its value unchanged. On main
+    the legacy splitter misread it and the measure was NEEDS REVIEW."""
+    literal = dax[dax.index('"') + 1:dax.rindex('"')]
+    expr, status, _ = translate_dax(dax)
+    assert (expr, status) == (f"(if ([T::s] = '{literal}') then 1 else 0)", "Migrated")
 
 
 def test_split_args_skips_strings_quoted_names_and_brackets():
@@ -321,13 +321,12 @@ def test_split_args_skips_strings_quoted_names_and_brackets():
 
 
 def test_in_set_inside_if():
-    """A one-member set inside a call reads the same to both splitters and translates, as
-    on main; a set whose commas sit inside a call stays NEEDS REVIEW, as on main, until the
-    rewrites skip quoted text (BL-611)."""
+    """A set inside a call translates, one member or several. A multi-member set was NEEDS
+    REVIEW until the rewrites skipped quoted text (BL-611)."""
     expr, status, _ = translate_dax('IF(T[s] IN {"a"}, 1, 0)')
     assert (expr, status) == ("(if ([T::s] IN {'a'}) then 1 else 0)", "Migrated")
-    expr, status, note = translate_dax('IF(T[s] IN {"a","b"}, 1, 0)')
-    assert (expr, status) == (None, "NEEDS REVIEW") and "BL-611" in note
+    expr, status, _ = translate_dax('IF(T[s] IN {"a","b"}, 1, 0)')
+    assert (expr, status) == ("(if ([T::s] IN {'a','b'}) then 1 else 0)", "Migrated")
 
 
 # --- Round-5 review: the splitter must not open new inputs to _calc_approx ---------
@@ -546,11 +545,11 @@ def test_a_set_beside_a_negation_it_is_not_under_still_translates(dax, expected)
     'IF(Fact[s] IN {1, 2.5}, 1, 0)',
 ])
 def test_the_negation_scan_passes_a_multi_member_set_it_is_not_over(dax):
-    """Refused today by the whole-measure splitter check (BL-611), but the negation scan
-    must not be what refuses them, or lifting that check would leave them refused."""
+    """No negation reaches these sets, so the negation scan passes them and, now that the
+    rewrites skip quoted text (BL-611), they translate."""
     from ts_cli.powerbi.in_sets import in_set_reason as _in_set_reason
     assert _in_set_reason(dax) is None
-    assert translate_dax(dax)[1] == "NEEDS REVIEW"
+    assert translate_dax(dax)[1] == "Migrated"
 
 
 # --- A non-ASCII letter outside quotes must not crash the IN-set scan ----------------
@@ -598,20 +597,31 @@ _ROUND7_WHOLE_MEASURE = [
     'Sales[Channel] = "Online"), 0)',
     'IF(MAX(Dates[Region]) IN {"a","b"}, CALCULATE(SUM(Sales[Amt]), FILTER(ALL(Dates[Date]), '
     'Dates[Date] <= MAX(Dates[Date]))), 0)',
-    # blocking 3: string literals rewritten where main refused the measure
-    'IF(T[s] = "a,  b", 1, 0)',
-    'IF(T[s] IN {"a  b","c"}, 1, 0)',
-    'IF(T[s] = "x <> y, z", 1, 0)',
-    'IF(T[s] IN {"a && b","c"}, 1, 0)',
-    'IF(T[s] = "[Region], x", 1, 0)',
 ]
 
 
 @pytest.mark.parametrize("dax", _ROUND7_WHOLE_MEASURE)
-def test_a_measure_the_legacy_splitter_misread_stays_needs_review(dax):
-    expr, status, note = translate_dax(dax, home_table="T", home_cols={"Region"})
+def test_a_lossy_calculate_beside_text_the_old_splitter_misread_needs_review(dax):
+    """blocking 1: the CALCULATE rewrites are lossy (BL-609) and are kept away from any
+    measure the old splitter could not read, checked over the whole measure, not only the
+    CALCULATE body. Disabling that whole-measure check fails these."""
+    expr, status, _ = translate_dax(dax, home_table="T", home_cols={"Region"})
     assert (expr, status) == (None, "NEEDS REVIEW")
-    assert "BL-611" in note
+
+
+@pytest.mark.parametrize("dax,literal", [
+    ('IF(T[s] = "a,  b", 1, 0)', "'a,  b'"),
+    ('IF(T[s] IN {"a  b","c"}, 1, 0)', "'a  b'"),
+    ('IF(T[s] = "x <> y, z", 1, 0)', "'x <> y, z'"),
+    ('IF(T[s] IN {"a && b","c"}, 1, 0)', "'a && b'"),
+    ('IF(T[s] = "[Region], x", 1, 0)', "'[Region], x'"),
+])
+def test_a_rewrite_never_reaches_inside_a_literal(dax, literal):
+    """blocking 3 / BL-611: whitespace collapse, operator rewrites and home-column
+    qualification all skip quoted text, so the value DAX compares against is emitted as
+    written."""
+    expr, status, _ = translate_dax(dax, home_table="T", home_cols={"Region"})
+    assert status == "Migrated" and literal in expr
 
 
 @pytest.mark.parametrize("dax", [
@@ -668,12 +678,14 @@ def test_in_inside_quotes_or_a_name_and_a_comment_without_a_set_still_translate(
     'VAR a = CALCULATE(DISTINCTCOUNT(Orders[OrderId]), Orders[Metric] = "[Revenue]") '
     'VAR b = CALCULATE(DISTINCTCOUNT(Orders[OrderId]), Orders[s] = "y") RETURN a / b',
 ])
-def test_a_gated_literal_the_reference_rewrite_changed_needs_review(dax):
-    """_refs_to_ids reaches inside quoted text (BL-611), so "[Revenue]" with a sibling
-    measure Revenue became '[formula_Revenue]', a value no row holds."""
+def test_a_gated_literal_naming_a_sibling_measure_keeps_its_value(dax):
+    """_refs_to_ids reached inside quoted text, so "[Revenue]" with a sibling measure
+    Revenue became '[formula_Revenue]', a value no row holds, and the measure was refused.
+    The rewrite now skips literals (BL-611), so the literal survives and the shape converts."""
     expr, status, _ = translate_dax(dax, home_table="Orders",
                                     measure_dax={"Revenue": "SUM(Orders[Amt])"})
-    assert (expr, status) == (None, "NEEDS REVIEW")
+    assert status == "Approximated"
+    assert "'[Revenue]'" in expr and "formula_Revenue" not in expr
 
 
 def test_a_gated_literal_with_no_sibling_reference_still_converts():
@@ -685,9 +697,9 @@ def test_a_gated_literal_with_no_sibling_reference_still_converts():
 
 @pytest.mark.parametrize("dax", ["DISTINCTCOUNT(T[a]]b])", "DISTINCTCOUNT(T[Amount [USD]]])",
                                  "DISTINCTCOUNT(T[a[b])", "DISTINCTCOUNT('T]'[c])"])
-def test_a_call_synthesised_by_an_expansion_is_checked_too(dax):
-    """DISTINCTCOUNT expands to an IF(ISBLANK(x), 1, 0) the legacy splitter misreads when x
-    holds a bracket; main refused these, and checking only the original text let them by."""
+def test_a_name_holding_a_bracket_needs_review(dax):
+    """ThoughtSpot's [Table::Column] has no escape for a bracket in a name, so these would
+    be emitted broken. Main refused them (its splitter misread them); they still refuse."""
     assert translate_dax(dax)[:2] == (None, "NEEDS REVIEW")
 
 
@@ -699,3 +711,41 @@ def test_a_call_main_never_split_is_not_refused(dax):
     """The legacy comparison runs where a call is split, not at every paren: these
     translated on main and still do."""
     assert translate_dax(dax)[1] in ("Migrated", "Approximated")
+
+
+# --- BL-611: no rewrite or scan reads inside a string literal or a [name] -------------
+
+@pytest.mark.parametrize("dax,kwargs,expected", [
+    # _qualify_home_and_dates: a home column named inside a string stays text
+    ('IF(Fact[s] = "[Amount]", 1, 0)', {"home_table": "Fact", "home_cols": {"Amount", "s"}},
+     "(if ([Fact::s] = '[Amount]') then 1 else 0)"),
+    # _normalize_operators: && || <> inside a string are text
+    ('IF(T[s] = "a && b", 1, 0)', {}, "(if ([T::s] = 'a && b') then 1 else 0)"),
+    ('IF(T[s] = "x <> y", 1, 0)', {}, "(if ([T::s] = 'x <> y') then 1 else 0)"),
+    # the whitespace collapse
+    ('IF(T[s] = "a  b", 1, 0)', {}, "(if ([T::s] = 'a  b') then 1 else 0)"),
+    # NOT inside a column name names the column
+    ("IF(T[NOT] = 1, 1, 0)", {}, "(if ([T::NOT] = 1) then 1 else 0)"),
+    # _refs_to_ids: a sibling measure's [Name] inside a string stays text
+    ('IF(Orders[Metric] = "[Revenue]", 1, 0)', {"measure_dax": {"Revenue": "SUM(Orders[Amt])"}},
+     "(if ([Orders::Metric] = '[Revenue]') then 1 else 0)"),
+    # the function-name scan: `a(` inside a string is not a call (was refused)
+    ('IF(T[s] = "a(", 1, 0)', {}, "(if ([T::s] = 'a(') then 1 else 0)"),
+    # the review scan: CALCULATE / VAR ... RETURN inside a string are text (were refused)
+    ('IF(T[s] = "CALCULATE(x)", 1, 0)', {}, "(if ([T::s] = 'CALCULATE(x)') then 1 else 0)"),
+    ('IF(T[s] = "VAR x RETURN", 1, 0)', {}, "(if ([T::s] = 'VAR x RETURN') then 1 else 0)"),
+    # the call expansion: IF( inside a string is not a call
+    ('IF(T[s] = "IF(a, b)", 1, 0)', {}, "(if ([T::s] = 'IF(a, b)') then 1 else 0)"),
+    # the date-subtraction rewrite: two date columns named inside a string stay text
+    ('IF(T[s] = "[T::a] - [T::b]", 1, 0)', {"date_cols": {"T::a", "T::b"}},
+     "(if ([T::s] = '[T::a] - [T::b]') then 1 else 0)"),
+])
+def test_bl611_a_rewrite_leaves_literals_and_names_alone(dax, kwargs, expected):
+    """Each pass ran a regex over the whole expression, so it changed the value a string
+    compares against or the column a name means, labelled Migrated (BL-611)."""
+    assert translate_dax(dax, **kwargs)[:2] == (expected, "Migrated")
+
+
+def test_bl611_a_lone_amp_inside_a_string_is_not_a_concatenation():
+    _, status, note = translate_dax('IF(T[s] = "x & y", 1, 0)')
+    assert status == "Migrated" and "concatenation" not in note

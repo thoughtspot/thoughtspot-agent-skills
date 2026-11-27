@@ -371,7 +371,7 @@ are roughly ordered by value÷effort.
 | BL-559 | Tableau converter defaults a missing ELSE to `else 0` inside MEDIAN/MAX/STDEV | 2026-12-15 |
 | BL-570 | Seven Model builders omit `join_progressive`, and an absent property behaves as off: every query joins every table | 2026-12-15 |
 | BL-609 | Power BI `_calc_approx` keeps only the first aggregate's argument, so a CALCULATE over a compound expression returns the wrong number labelled Approximated | 2027-01-31 |
-| BL-611 | Power BI `translate_dax` rewrites text inside string literals and column names (`"[Amount]"`, `"a && b"`, `T[NOT]`), labelled Migrated | 2027-01-15 |
+| ~~BL-611~~ | ~~Power BI `translate_dax` rewrites text inside string literals and column names (`"[Amount]"`, `"a && b"`, `T[NOT]`), labelled Migrated~~ | DONE (2026-11-27) |
 | BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
 | BL-629 | from-databricks-mv: a dimension referencing another dimension is emitted as a nonexistent table column; lint does not check formula exprs — converter fixed 2026-11-27; lint XREF over `formulas[].expr` still open | 2026-12-15 |
 | ~~BL-630~~ | ~~from-databricks-mv: a display-title clash between a column and a formula silently drops the column~~ | DONE (2026-11-27) |
@@ -18559,11 +18559,11 @@ points to BL-607 item 21 rather than repeating it.
 - `CALCULATE(COUNTROWS(DISTINCT(Sales[Cust])), ...)` becomes a row count, and `CALCULATE(COUNT(Fact[k]), ...)` counts rows with a blank key, which DAX `COUNT` skips.
 - `CALCULATE(SUM(Fact[x]), FILTER(ALL(Fact), <cond>))` drops the `ALL`, so a total that is the same in every row becomes per row. The running-total idiom `CALCULATE(SUM(Sales[Amount]), FILTER(ALL(Dates[Date]), Dates[Date] <= MAX(Dates[Date])))` is the common case. The rewrite runs before the review gate, so `ALL` never reaches the gate.
 
-PR #517 keeps the inputs its quote-aware argument splitter newly lets through (an `IN {...}` set; a `,` `(` `)` `[` or `]` inside a string; a `[column]` whose parens do not nest; a stray `]`) away from this rewrite, inside the CALCULATE (`_split_reads_differently`) and at every call the translator splits (`_legacy_reads_differently`), so they stay NEEDS REVIEW. The `=`-filter forms above, with nothing the earlier splitter misread, still reach it, as on main.
+PR #517 keeps the inputs its quote-aware argument splitter newly lets through (an `IN {...}` set; a `,` `(` `)` `[` or `]` inside a string; a `[column]` whose parens do not nest; a stray `]`) away from this rewrite (`_split_reads_differently`). Since BL-611 the check reads the whole measure, not only the CALCULATE body, so an IN set beside the CALCULATE keeps it away too; they stay NEEDS REVIEW. The `=`-filter forms above, with nothing the earlier splitter misread, still reach it, as on main.
 
 **Do.**
 1. Give `_calc_approx` the gated parser's exact-shape rule (`ts_cli/powerbi/gated.py`): the first argument must be exactly `SUM(<column>)` or `COUNTROWS(<table>)`, and every filter exactly `<column> = <literal>`, `<column> IN {<literals>}` or a `FILTER(<table>, <one such condition>)` with no `ALL`/`ALLSELECTED`/`REMOVEFILTERS`. Refuse everything else.
-2. Then drop `_split_reads_differently`, since the exact-shape rule covers it (`_legacy_reads_differently` stays until BL-611).
+2. Then drop `_split_reads_differently`, since the exact-shape rule covers it.
 3. A negative test per shape above, each against an `=` filter, an `IN {...}` set and a filter whose string holds a comma.
 
 **Target:** 2027-01-31.
@@ -18581,6 +18581,9 @@ PR #517 keeps the inputs its quote-aware argument splitter newly lets through (a
 **Target:** 2027-01-31.
 
 ## BL-611 — `translate_dax` rewrites text inside DAX string literals and column names, so a filter on a string holding `[Col]`, `&&` or `NOT` matches a different value, labelled Migrated `Tier 2`
+
+
+**Status: DONE (2026-11-27).** Every whole-text rewrite and scan in `translate_dax` runs through `_sub_outside` / `_finditer_outside`, which skip quoted text and `[names]`; `_legacy_reads_differently` is gone and its tests flipped to assert the value as written; a test per bullet below goes red with the fix reverted (`test_bl611_a_rewrite_leaves_literals_and_names_alone`); item 4's two test nits are done. Two things the legacy net also covered are kept explicitly: the lossy CALCULATE rewrites stay away from any measure the earlier splitter misread, checked over the whole measure (BL-609), and a name holding `[` or `]` is refused.
 
 **Filed:** 2026-11-19. **Source:** the PR #517 round-6 review, and two finds the PR's author reported in the same thread. All four are on `main` for text the earlier splitter read. PR #517 lets none of them through further: text the earlier splitter reads differently at a call the translator splits (`IF`, `AND`, `OR`, `DIVIDE`, `ROUND`, `CEILING`, `FLOOR`, `CALCULATE`) stays NEEDS REVIEW (`_legacy_reads_differently`, `_split_reads_differently`), and a gated measure is refused when an earlier rewrite changed one of its string literals. Calls the translator does not split are exposed as on main: `CONCATENATE(T[Last], ",  ")` gives `concat([T::Last], ', ')`, a wrong literal, on both.
 
@@ -20098,8 +20101,8 @@ fuzz against `main`), which found no remaining blocker. **Target:** 2027-01-31.
    text unchanged, which covers literals and names alike.
 5. **Test gaps.** Disabling `_split_reads_differently` fails no test: it still changes outcomes,
    always toward refusal (`CALCULATE(COUNTROWS(T), T[s] IN {"a"})` is refused, where `main` gives
-   `sum_if`). Pin that, or drop it in favour of `_legacy_reads_differently` at the CALCULATE split
-   sites. `ISEMPTY` in `_BLANK_TESTS` is untested and unreachable (ISEMPTY takes a table); drop it.
+   `sum_if`). **Pinned since BL-611**: the check now reads the whole measure, and disabling it
+   fails `test_a_lossy_calculate_beside_text_the_old_splitter_misread_needs_review`. `ISEMPTY` in `_BLANK_TESTS` is untested and unreachable (ISEMPTY takes a table); drop it.
 
 ---
 
