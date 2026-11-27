@@ -1,48 +1,31 @@
-"""Pure logic behind `ts databricks verify` (BL-639): no I/O.
+"""The plan behind `ts databricks verify` (BL-639): no I/O.
 
 Checks that a Model converted from a Databricks Metric View returns the same numbers as
 the Metric View. The same query shapes run on both sides, `MEASURE()` on the Metric View
 and AgentQL on the Model, and the results are compared cell by cell. Lint and import both
 passed Models that returned wrong numbers (BL-638); only this comparison caught them.
 
-This module plans the run and judges it: which MV measures and dimensions the Model
-carries, the default query shapes, the SQL text for both sides, key normalisation and the
-comparison. The command (`commands/databricks_verify.py`) runs the queries.
+This module plans the run: which MV measures and dimensions the Model carries, the query
+shapes, the SQL text for both sides, and how the imported Model differs from the TML
+file. `mv_verify_compare.py` judges the results; `commands/databricks_verify.py` runs the
+queries.
 
-What the comparison relies on, each live-checked on the run BL-639 records (21 shapes,
-6,549 cells):
-
-- **AgentQL wrappers** come from `spotql_ops.classify_model_columns`: `AGG` for an
-  aggregate formula, `SUM` for a semi-additive `first_value`/`last_value` formula. A raw
-  column is wrapped in its own aggregation (`AVERAGE` -> `AVG`), which BL-639's harness
-  did not need (its raw columns were all `SUM`); `STD_DEVIATION` and `VARIANCE` cannot be
-  queried on a Model column in AgentQL, so those measures are listed, not compared.
-- **DATE values** arrive from AgentQL as epoch seconds (or milliseconds) at midnight in
-  the ThoughtSpot cluster's time zone, so a date key needs that zone to decode.
-- **Booleans** compare case-insensitively (`true` from Databricks, `True` from AgentQL),
-  and numbers with relative and absolute tolerance 1e-9.
-
-TIMESTAMP keys are normalised the same way at second precision, the Databricks value
-converted to the cluster zone; that conversion is not live-verified. A wrong guess shows
-up as rows present on one side only, never as a silent match.
+AgentQL wrappers: `spotql_ops.classify_model_columns` gives `AGG` for an aggregate
+formula and `SUM` for a semi-additive `first_value`/`last_value` formula; both were
+live-checked on the run BL-639 records. A raw column is wrapped in its own aggregation
+(`AVERAGE` -> `AVG`, `COUNT_DISTINCT` -> `COUNT(DISTINCT …)`). Only the `SUM` form of that
+was live-checked, because that run's raw columns were all `SUM`. `STD_DEVIATION` and
+`VARIANCE` cannot be queried on a Model column in AgentQL, so those measures are listed,
+not compared.
 """
 from __future__ import annotations
 
-import datetime as _dt
-import math
 import re
-from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
+from ts_cli.commands.load_databricks import dbx_ident
 from ts_cli.databricks.mv_translate import display_title
 from ts_cli.spotql_ops import classify_model_columns
-
-REL_TOL = 1e-9
-ABS_TOL = 1e-9
-#: AgentQL caps an ordinary SELECT at 100,000 rows and says nothing when it does.
-AGENTQL_ROW_CAP = 100_000
-#: Mismatch entries kept per shape in the report; the count is always the full one.
-MAX_MISMATCHES_KEPT = 50
 
 _FLAG_NAME = re.compile(r"^(is|has)[_ ]", re.IGNORECASE)
 
@@ -51,18 +34,13 @@ _FLAG_NAME = re.compile(r"^(is|has)[_ ]", re.IGNORECASE)
 _RAW_AGGREGATE = {"SUM": "SUM", "AVERAGE": "AVG", "MIN": "MIN", "MAX": "MAX",
                   "COUNT": "COUNT", "COUNT_DISTINCT": "COUNT(DISTINCT)"}
 
-#: Databricks Statement Execution `type_name` -> how a value of it is normalised.
-_KIND_BY_TYPE = {"DATE": "date", "TIMESTAMP": "timestamp", "TIMESTAMP_NTZ": "timestamp",
-                 "BOOLEAN": "boolean", "BYTE": "number", "SHORT": "number",
-                 "INT": "number", "LONG": "number", "FLOAT": "number",
-                 "DOUBLE": "number", "DECIMAL": "number"}
-
 
 # ---------------------------------------------------------------------------
 # Plan: which measures and dimensions can be compared
 # ---------------------------------------------------------------------------
 
-def _model_body(model_doc: dict) -> dict:
+def model_body(model_doc: dict) -> dict:
+    """The `model:` mapping of a Model TML document (or the document itself)."""
     inner = model_doc.get("model") if isinstance(model_doc, dict) else None
     return inner if isinstance(inner, dict) else (model_doc or {})
 
@@ -93,33 +71,53 @@ def is_flag_dimension(mv_name: str, title: str, formula_expr: str = "") -> bool:
     return bool(_FLAG_NAME.match(mv_name) or _FLAG_NAME.match(title))
 
 
-def _plan_measures(parsed: dict, classified: dict) -> tuple[list, list, list]:
-    measures, missing, unverifiable = [], [], []
+def converter_skips(translated: Optional[dict]) -> dict:
+    """{"measure": {names}, "dimension": {names}} the converter skipped, from the
+    translate-formulas output; empty when it was not given."""
+    out: dict = {"measure": set(), "dimension": set()}
+    for s in (translated or {}).get("skipped") or []:
+        if isinstance(s, dict) and s.get("role") in out:
+            out[s["role"]].add(s.get("name"))
+    return out
+
+
+def _absent(plan: dict, role: str, name: str, skips: dict) -> None:
+    key = "skipped_by_converter" if name in skips[role] else "missing"
+    plan[key][role + "s"].append(name)
+
+
+def _plan_measures(parsed: dict, columns: dict, plan: dict, skips: dict) -> None:
     for m in parsed.get("measures") or []:
-        title = display_title(m)
-        col = classified.get(title)
-        if col is None or col["column_type"] != "MEASURE":
-            missing.append(m["name"])
-            continue
-        fn, reason = agentql_function(col)
-        if fn is None:
-            unverifiable.append({"mv_name": m["name"], "title": title, "reason": reason})
-            continue
-        measures.append({"mv_name": m["name"], "title": title, "agentql": fn})
-    return measures, missing, unverifiable
+        col = columns.get(display_title(m).lower())
+        if col is None:
+            _absent(plan, "measure", m["name"], skips)
+        elif col["column_type"] != "MEASURE":
+            plan["wrong_column_type"].append({"mv_name": m["name"], "title": col["name"],
+                                              "role": "measure",
+                                              "column_type": col["column_type"]})
+        else:
+            fn, reason = agentql_function(col)
+            entry = {"mv_name": m["name"], "title": col["name"]}
+            if fn is None:
+                plan["not_verifiable"].append({**entry, "reason": reason})
+            else:
+                plan["measures"].append({**entry, "agentql": fn})
 
 
-def _plan_dimensions(parsed: dict, classified: dict, exprs: dict) -> tuple[list, list]:
-    dims, missing = [], []
+def _plan_dimensions(parsed: dict, columns: dict, exprs: dict, plan: dict,
+                     skips: dict) -> None:
     for d in parsed.get("dimensions") or []:
-        title = display_title(d)
-        col = classified.get(title)
-        if col is None or col["column_type"] == "MEASURE":
-            missing.append(d["name"])
-            continue
-        dims.append({"mv_name": d["name"], "title": title,
-                     "flag": is_flag_dimension(d["name"], title, exprs.get(title, ""))})
-    return dims, missing
+        col = columns.get(display_title(d).lower())
+        if col is None:
+            _absent(plan, "dimension", d["name"], skips)
+        elif col["column_type"] == "MEASURE":
+            plan["wrong_column_type"].append({"mv_name": d["name"], "title": col["name"],
+                                              "role": "dimension", "column_type": "MEASURE"})
+        else:
+            title = col["name"]
+            plan["dimensions"].append({
+                "mv_name": d["name"], "title": title,
+                "flag": is_flag_dimension(d["name"], title, exprs.get(title, ""))})
 
 
 def window_order_dimensions(parsed: dict) -> list[str]:
@@ -132,28 +130,66 @@ def window_order_dimensions(parsed: dict) -> list[str]:
     return seen
 
 
-def build_plan(parsed: dict, model_doc: dict) -> dict:
+def build_plan(parsed: dict, model_doc: dict, translated: Optional[dict] = None) -> dict:
     """Which MV measures and dimensions the Model carries, and how to query each.
 
-    A measure counts when its display title (`mv_translate.display_title`, the name
-    `build-model` gives it) is a MEASURE column of the Model; the rest are listed under
-    `not_in_model`, which is not a mismatch. A dimension counts when its title is a
-    non-MEASURE column."""
-    model = _model_body(model_doc)
-    classified = {c["name"]: c for c in classify_model_columns({"model": model})}
-    exprs = _formula_exprs(model)
-    measures, missing_m, unverifiable = _plan_measures(parsed, classified)
-    dims, missing_d = _plan_dimensions(parsed, classified, exprs)
-    in_model = {d["mv_name"] for d in dims}
-    return {
-        "model_name": model.get("name") or "",
-        "measures": measures,
-        "dimensions": dims,
-        "order_dimensions": [{"mv_name": o, "in_model": o in in_model}
-                             for o in window_order_dimensions(parsed)],
-        "not_in_model": {"measures": missing_m, "dimensions": missing_d},
-        "not_verifiable": unverifiable,
-    }
+    An MV entry's display title (`mv_translate.display_title`, the name `build-model`
+    gives it) is looked up among the Model's columns ignoring case; the Model's own
+    spelling is used in AgentQL. An entry with no column is `skipped_by_converter` when
+    `translated` (the translate-formulas output) lists it as skipped, else `missing`. A
+    measure on an ATTRIBUTE column, or a dimension on a MEASURE column, is
+    `wrong_column_type`. `plan_problems` says which of these fail the run."""
+    model = model_body(model_doc)
+    columns = {c["name"].lower(): c for c in classify_model_columns({"model": model})}
+    skips = converter_skips(translated)
+    plan: dict = {"model_name": model.get("name") or "", "measures": [], "dimensions": [],
+                  "skipped_by_converter": {"measures": [], "dimensions": []},
+                  "missing": {"measures": [], "dimensions": []},
+                  "wrong_column_type": [], "not_verifiable": []}
+    _plan_measures(parsed, columns, plan, skips)
+    _plan_dimensions(parsed, columns, _formula_exprs(model), plan, skips)
+    in_model = {d["mv_name"] for d in plan["dimensions"]}
+    plan["order_dimensions"] = [{"mv_name": o, "in_model": o in in_model}
+                                for o in window_order_dimensions(parsed)]
+    return plan
+
+
+def plan_problems(plan: dict) -> list[str]:
+    """What fails the run before any query: a measure or dimension the converter did not
+    skip but the Model lacks, and one on a column of the wrong type."""
+    out = []
+    for role in ("measures", "dimensions"):
+        if plan["missing"][role]:
+            out.append(f"MV {role} with no Model column and not skipped by the converter: "
+                       f"{', '.join(plan['missing'][role])}")
+    for w in plan["wrong_column_type"]:
+        out.append(f"MV {w['role']} {w['mv_name']} is a {w['column_type']} column "
+                   f"({w['title']}) in the Model")
+    return out
+
+
+def _column_signature(model_doc: dict) -> dict:
+    sig = {}
+    for c in model_body(model_doc).get("columns") or []:
+        props = c.get("properties") or {}
+        ctype = props.get("column_type") or "ATTRIBUTE"
+        agg = (props.get("aggregation") or "SUM") if ctype == "MEASURE" else None
+        sig[c.get("name")] = (ctype, agg)
+    return sig
+
+
+def model_differences(file_doc: dict, imported_doc: dict) -> list[str]:
+    """Column names, types and aggregations that differ between the Model TML file and
+    the imported Model's export. The plan is built from the export, which is what
+    AgentQL queries; a difference means the file is not what was imported."""
+    a, b = _column_signature(file_doc), _column_signature(imported_doc)
+    out = [f"column {n!r} is in --model-tml but not in the imported Model"
+           for n in a if n not in b]
+    out += [f"column {n!r} is in the imported Model but not in --model-tml"
+            for n in b if n not in a]
+    out += [f"column {n!r}: --model-tml has {a[n]}, the imported Model {b[n]}"
+            for n in a if n in b and a[n] != b[n]]
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -166,26 +202,65 @@ def flag_filter_shapes(dim: dict) -> list[dict]:
              "flag": dim["mv_name"]} for lit in ("true", "false")]
 
 
-def pick_filter_value(values: list) -> Optional[str]:
-    """A string value to filter on, or None. A filter on the only value would equal the
-    total, so two distinct values are needed. Skipped: a value holding a quote or a
-    backslash (Databricks and AgentQL escape them differently) and one equal to another
-    in all but case (AgentQL compares strings case-insensitively, BL-333)."""
-    texts = sorted({v for v in values if isinstance(v, str)})
-    if len(texts) < 2:
-        return None
+def _usable_text(t: str, lowered: list) -> bool:
+    return (t != "" and t.strip() == t and "'" not in t and "\\" not in t
+            and lowered.count(t.lower()) == 1)
+
+
+def _string_literal(present: list) -> Optional[str]:
+    texts = sorted({v for v in present if isinstance(v, str)})
     lowered = [t.lower() for t in texts]
-    for t in texts:
-        if "'" not in t and "\\" not in t and lowered.count(t.lower()) == 1:
-            return t
-    return None
+    usable = [t for t in texts if _usable_text(t, lowered)] if len(texts) > 1 else []
+    return f"'{usable[0]}'" if usable else None
 
 
-def value_filter_shape(dim: dict, value: str) -> dict:
-    """The total filtered on one value of a string dimension: a search filter beside
-    every measure at once, LOD columns included."""
-    return {"label": f"{dim['title']} = '{value}'", "dims": [],
-            "filter": [dim["mv_name"], f"'{value}'"]}
+def _integer_literal(present: list) -> Optional[str]:
+    nums = sorted({int(v) for v in present if re.fullmatch(r"-?\d+", str(v))})
+    return str(nums[0]) if len(nums) > 1 else None
+
+
+def _date_literal(present: list) -> Optional[str]:
+    days = sorted({str(v)[:10] for v in present
+                   if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(v)[:10])})
+    return f"TO_DATE('{days[0]}')" if len(days) > 1 else None
+
+
+_LITERAL_BY_KIND = {"string": _string_literal, "integer": _integer_literal,
+                    "date": _date_literal}
+
+
+def pick_filter_literal(values: list, kind: str) -> Optional[str]:
+    """A SQL literal for one value of a dimension, used as written on both sides, or
+    None. A filter on the only value would equal the total, so two distinct values are
+    needed. A string value is passed over when it is empty, has spaces at either end,
+    holds a quote or a backslash (the two sides escape them differently), or equals
+    another value in all but case (AgentQL compares strings case-insensitively, BL-333).
+    An integer is written as is; a date as `TO_DATE('yyyy-mm-dd')`."""
+    pick = _LITERAL_BY_KIND.get(kind)
+    return pick([v for v in values if v is not None]) if pick else None
+
+
+#: Kinds the search filter tries, in order: strings first, then exact numbers, then dates.
+SEARCH_FILTER_KINDS = ("string", "integer", "date")
+
+
+def search_filter_shape(dims: list[dict], dim_values: dict) -> tuple[Optional[dict], str]:
+    """The total filtered on one value of a dimension: a search filter beside every
+    measure at once, LOD columns included. `dim_values` maps an MV dimension name to
+    `(kind, values)` from its single-dimension shape. Returns (shape, "") or
+    (None, the reason no dimension gave a usable value)."""
+    for kind in SEARCH_FILTER_KINDS:
+        for d in dims:
+            got = dim_values.get(d["mv_name"])
+            if not got or got[0] != kind:
+                continue
+            literal = pick_filter_literal(got[1], kind)
+            if literal is not None:
+                return {"label": f"{d['title']} = {literal}", "dims": [],
+                        "filter": [d["mv_name"], literal], "search_filter": True}, ""
+    return None, ("no string, integer or date dimension had two usable values (a string "
+                  "value must be non-empty, without spaces at either end, quotes or "
+                  "backslashes, and unique ignoring case)")
 
 
 def default_shapes(plan: dict) -> list[dict]:
@@ -196,7 +271,7 @@ def default_shapes(plan: dict) -> list[dict]:
     among the single-dimension shapes; the plan's `order_dimensions` says which are not.
     Grouping on a flag is its single-dimension shape. A filtered shape carries `flag`,
     the dimension it needs to be BOOLEAN on Databricks. The command adds shapes that need
-    the data first: flags found by their Databricks type, and `value_filter_shape`."""
+    the data first: flags found by their Databricks type, and `search_filter_shape`."""
     shapes = [{"label": "total", "dims": [], "filter": None}]
     for d in plan["dimensions"]:
         shapes.append({"label": f"by {d['title']}", "dims": [d["mv_name"]], "filter": None})
@@ -249,10 +324,6 @@ def parse_shapes(raw: Any, plan: dict) -> list[dict]:
 # SQL text
 # ---------------------------------------------------------------------------
 
-def _bt(name: str) -> str:
-    return "`" + str(name).replace("`", "``") + "`"
-
-
 def _dq(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
 
@@ -262,16 +333,17 @@ def quote_mv_fqn(mv_fqn: str) -> str:
     already holds a backtick."""
     if "`" in mv_fqn:
         return mv_fqn
-    return ".".join(_bt(p) for p in mv_fqn.split("."))
+    return ".".join(dbx_ident(p) for p in mv_fqn.split("."))
 
 
 def databricks_sql(mv_fqn: str, shape: dict, measures: list[dict]) -> str:
     """`SELECT <dims>, MEASURE(m) AS m0, ... FROM <mv> [WHERE d = lit] [GROUP BY ALL]`."""
-    sel = [_bt(d) for d in shape["dims"]]
-    sel += [f"MEASURE({_bt(m['mv_name'])}) AS {_bt(f'm{i}')}" for i, m in enumerate(measures)]
+    sel = [dbx_ident(d) for d in shape["dims"]]
+    sel += [f"MEASURE({dbx_ident(m['mv_name'])}) AS {dbx_ident(f'm{i}')}"
+            for i, m in enumerate(measures)]
     sql = f"SELECT {', '.join(sel)} FROM {quote_mv_fqn(mv_fqn)}"
     if shape.get("filter"):
-        sql += f" WHERE {_bt(shape['filter'][0])} = {shape['filter'][1]}"
+        sql += f" WHERE {dbx_ident(shape['filter'][0])} = {shape['filter'][1]}"
     if shape["dims"]:
         sql += " GROUP BY ALL"
     return sql
@@ -296,186 +368,3 @@ def agentql_sql(model_name: str, shape: dict, measures: list[dict], titles: dict
     if cols:
         q += " GROUP BY " + ", ".join(cols)
     return q
-
-
-# ---------------------------------------------------------------------------
-# Results
-# ---------------------------------------------------------------------------
-
-def databricks_result(response: dict) -> tuple[list[str], list[list]]:
-    """(column kinds, rows) from a Statement Execution response.
-
-    Refuses a result split into chunks or truncated: comparing part of it would report
-    the missing rows as mismatches."""
-    manifest = response.get("manifest") or {}
-    result = response.get("result") or {}
-    chunks = manifest.get("total_chunk_count") or 1
-    if chunks > 1 or result.get("next_chunk_index") is not None:
-        raise ValueError(f"the Databricks result arrived in {chunks} chunks; narrow the "
-                         f"shape (fewer or coarser dimensions)")
-    if manifest.get("truncated"):
-        raise ValueError("the Databricks result was truncated; narrow the shape")
-    cols = (manifest.get("schema") or {}).get("columns") or []
-    kinds = [_KIND_BY_TYPE.get(str(c.get("type_name") or "").upper(), "string") for c in cols]
-    return kinds, result.get("data_array") or []
-
-
-def _epoch_seconds(value: Any) -> Optional[float]:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        v = float(value)
-    elif isinstance(value, str) and re.fullmatch(r"-?\d+", value.strip()):
-        v = float(value)
-    else:
-        return None
-    return v / 1000 if abs(v) >= 1e11 else v      # milliseconds past ~year 5138 in seconds
-
-
-def _date_text(value: Any, tz: _dt.tzinfo) -> str:
-    epoch = _epoch_seconds(value)
-    if epoch is not None:
-        return _dt.datetime.fromtimestamp(epoch, tz).date().isoformat()
-    return str(value)[:10]
-
-
-def _timestamp_text(value: Any, tz: _dt.tzinfo) -> str:
-    epoch = _epoch_seconds(value)
-    if epoch is not None:
-        return _dt.datetime.fromtimestamp(epoch, tz).strftime("%Y-%m-%d %H:%M:%S")
-    text = str(value).strip()
-    try:
-        parsed = _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return text
-    if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(tz)
-    return parsed.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _number_text(value: Any) -> str:
-    try:
-        d = Decimal(str(value))
-    except InvalidOperation:
-        return str(value)
-    if not d.is_finite():
-        return str(d)
-    if d == d.to_integral_value():
-        return str(int(d))
-    return format(d.normalize(), "f")
-
-
-def norm_key(value: Any, kind: str, tz: _dt.tzinfo) -> Optional[str]:
-    """One grouping value as text both sides agree on; None stays None (a NULL group)."""
-    if value is None:
-        return None
-    if isinstance(value, bool) or kind == "boolean":
-        return str(value).lower()
-    if kind == "date":
-        return _date_text(value, tz)
-    if kind == "timestamp":
-        return _timestamp_text(value, tz)
-    if kind == "number":
-        return _number_text(value)
-    return str(value)
-
-
-def _as_float(value: Any) -> Optional[float]:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    try:
-        return float(str(value))
-    except ValueError:
-        return None
-
-
-def cells_match(a: Any, b: Any, kind: str, tz: _dt.tzinfo) -> bool:
-    """Do two measure values agree? NULL matches only NULL; numbers within 1e-9 (relative
-    or absolute); dates and timestamps after normalising; booleans in any case."""
-    if a is None or b is None:
-        return a is None and b is None
-    if kind in ("date", "timestamp", "boolean"):
-        return norm_key(a, kind, tz) == norm_key(b, kind, tz)
-    fa, fb = _as_float(a), _as_float(b)
-    if fa is not None and fb is not None:
-        if math.isnan(fa) or math.isnan(fb):
-            return math.isnan(fa) and math.isnan(fb)
-        return math.isclose(fa, fb, rel_tol=REL_TOL, abs_tol=ABS_TOL)
-    sa, sb = str(a), str(b)
-    if sa.lower() in ("true", "false"):
-        return sa.lower() == sb.lower()
-    return sa == sb
-
-
-def _index_rows(rows: list, n_dims: int, kinds: list, tz) -> tuple[dict, list]:
-    """key tuple -> measure values, plus the keys seen more than once."""
-    out: dict = {}
-    dupes: list = []
-    for row in rows:
-        key = tuple(norm_key(v, kinds[i], tz) for i, v in enumerate(row[:n_dims]))
-        if key in out:
-            dupes.append(key)
-        out[key] = list(row[n_dims:])
-    return out, dupes
-
-
-def _sort_key(key: tuple) -> tuple:
-    return tuple((v is None, "" if v is None else v) for v in key)
-
-
-def _compare_block(dbx: dict, block: dict, n_dims: int, kinds: list,
-                   measures: list, tz) -> list[dict]:
-    """Mismatches between Databricks and one AgentQL result covering some measures."""
-    idx = block["measures"]
-    ts, dupes = _index_rows(block["rows"], n_dims, kinds, tz)
-    out = [{"key": list(k), "issue": "duplicate key in the ThoughtSpot result"} for k in dupes]
-    names = [measures[i]["title"] for i in idx]
-    for key in sorted(set(dbx) | set(ts), key=_sort_key):
-        if key not in dbx or key not in ts:
-            side = "ThoughtSpot" if key in ts else "Databricks"
-            out.append({"key": list(key), "issue": f"row only in {side}", "measures": names})
-            continue
-        for j, i in enumerate(idx):
-            a, b = dbx[key][i], ts[key][j]
-            if not cells_match(a, b, kinds[n_dims + i], tz):
-                out.append({"key": list(key), "measure": measures[i]["title"],
-                            "databricks": a, "thoughtspot": b})
-    return out
-
-
-def compare_shape(n_dims: int, kinds: list, dbx_rows: list, ts_blocks: list,
-                  measures: list, tz) -> dict:
-    """Compare one shape. `ts_blocks` is a list of `{"measures": [measure indices],
-    "rows": [...]}`, one per AgentQL query (all measures in one query, or one each)."""
-    dbx, dupes = _index_rows(dbx_rows, n_dims, kinds, tz)
-    found = [{"key": list(k), "issue": "duplicate key in the Databricks result"} for k in dupes]
-    ts_rows = 0
-    for block in ts_blocks:
-        found.extend(_compare_block(dbx, block, n_dims, kinds, measures, tz))
-        ts_rows = max(ts_rows, len(block["rows"]))
-    compared = sum(len(b["measures"]) for b in ts_blocks)
-    return {"rows_databricks": len(dbx_rows), "rows_thoughtspot": ts_rows,
-            "cells": len(dbx_rows) * compared, "mismatch_count": len(found),
-            "mismatches": found[:MAX_MISMATCHES_KEPT]}
-
-
-def shape_status(result: dict) -> str:
-    if result.get("errors"):
-        return "error"
-    if result.get("skipped"):
-        return "skipped"
-    return "mismatch" if result.get("mismatch_count") else "match"
-
-
-def summarise(shapes: list[dict]) -> dict:
-    """Totals over the shape results, and the run status: `error` when any shape could
-    not be run, else `mismatch` when any cell disagrees, else `match`."""
-    counts = {s: sum(1 for r in shapes if r["status"] == s)
-              for s in ("match", "mismatch", "error", "skipped")}
-    summary = {"shapes": len(shapes), **counts,
-               "cells": sum(r.get("cells", 0) for r in shapes),
-               "mismatches": sum(r.get("mismatch_count", 0) for r in shapes)}
-    status = "error" if counts["error"] else ("mismatch" if counts["mismatch"] else "match")
-    return {"status": status, "summary": summary}
