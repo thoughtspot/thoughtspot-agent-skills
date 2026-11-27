@@ -19842,3 +19842,30 @@ pytest 10 is released that file fails on every PR.
 **Fix direction.** Make the fixture a `@classmethod` setting attributes on `cls`, as the
 warning says; or pin pytest's major version in the workflow's installs (and `pr_ready.py`'s
 copies of them) and move it deliberately.
+
+## BL-656 — pytest-xdist PR: review leftovers `Tier 4`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review of `feat/pytest-parallel` (no
+Blockers; these were triaged out of the PR). **Target:** 2027-01-31.
+
+1. **One `_dump_dom`, tested once, at every call site.** Three byte-identical copies
+   (`tools/ts-cli/tests/report_browser.py`, `agents/cli/ts-object-model-erd/tests/browser.py`,
+   `tools/quest/tests/smoke_explore.py`); the ERD copy has no test, and the retry tests call
+   the helper directly, so a call site reverted to a bare `subprocess.run` passes them all.
+2. **The retry condition is broader than its docstrings.** Any non-zero exit with empty
+   stdout is retried; `--dump-dom` prints only at the end of the virtual-time budget, so a
+   renderer crash after the page loaded is retried once too. Narrow it to the startup crash
+   (exit -6 with dyld on stderr) or reword the docstrings and `CHANGELOG.md`.
+3. **`_NO_XDIST` in `tools/validate/pr_ready.py` matches anywhere in the output, at any exit
+   code.** A failing test that quotes pytest's usage line is reported as "pytest-xdist is not
+   installed". Require exit 4 and anchor to `^\S*pytest: error: unrecognized arguments:`;
+   the note header still says "tests skipped for a missing module" for that case.
+4. **The evidence's "Not reproduced locally" list omits the worker count** (local: one per
+   CPU; CI: 4).
+5. **BL-653 says nothing of the startup crash this PR found and retries** (Chrome aborts in
+   dyld at startup, exits -6, prints nothing). Add a dated line, and check whether its
+   `test_audit_model_nav.py` failure is the same crash.
+6. **`CHANGELOG.md` 2026-11-27 figures:** "about 2 minutes at 18 workers" (the evidence run
+   took 187 s) and "needs `pytest-xdist==3.8.0`" (any xdist with `-n` works; 3.8.0 is CI's pin).
+
+**Done when.** Each is fixed or declined with its reason here.
