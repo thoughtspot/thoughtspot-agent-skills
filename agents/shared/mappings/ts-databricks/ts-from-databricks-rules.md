@@ -117,8 +117,9 @@ When the MV uses v1.1, map rich metadata:
 | Top-level `comment:` | Model `description` |
 | `name:` (identifier) | Use as `column_id` basis if no `display_name` |
 
-If the MV uses v0.1 (no `display_name`), use the `name:` field as both the display
-name and identifier.
+If the MV uses v0.1 (no `display_name`), the display name comes from the `name:`
+field as described below (title-cased unless its author cased it), and `name:` stays
+the identifier.
 
 ### Dimension → ThoughtSpot Column
 
@@ -136,7 +137,9 @@ Each dimension entry:
 ```
 Is expr a direct column reference (single identifier, no functions)?
   YES → ATTRIBUTE column
-        name: use display_name (or name if no display_name)
+        name: use display_name; with none, use a name cased by its author (upper and
+              lower case, no underscore: SKU Type) as written, and title-case any
+              other (order_month → Order Month, REVENUE → Revenue; BL-631)
         column_id: use the physical column name from expr
         description: use comment
         properties.synonyms: use synonyms list (with synonym_type: USER_DEFINED)
