@@ -19814,9 +19814,11 @@ Chrome creates and removes; now and then a launch lands in a clone whose framewo
 and dyld aborts it (`rc=-6`, empty stdout, `Library not loaded … code_sign_clone` on
 stderr). Reproduced with 8 parallel runs of the 15 Chrome test files under CPU load: 8
 failures, all this signature. `report_browser.render` now retries only that signature (up
-to 3 launches) and reports Chrome's exit code and stderr on any failure; the same stress
-run then gave 0 clone-race failures (4 launches recovered). **Still open:** one render in
+to 3 launches) and reports Chrome's exit code and stderr when it fails; the same stress
+run then gave 0 clone-race failures (4 launches recovered). The ERD tests' `browser.py` and
+the quest smoke `smoke_explore.py` launch Chrome through the same `run_chrome`, loaded by path,
+so every headless-Chrome test helper gets the retry. A hang now fails with Chrome's stderr tail
+instead of a bare `TimeoutExpired`. **Still open:** one render in
 about 3,500 hung to the 120 s timeout under that extreme load (8 suites plus 4 CPU
 burners), far beyond a normal hook or CI run. Not retried, since a retry on timeout would
 also hide a genuine hang; revisit if it is seen at normal load.
-

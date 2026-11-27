@@ -32,6 +32,17 @@ CHROMES = [os.environ.get("QUEST_CHROME", ""), "/Applications/Google Chrome.app/
            shutil.which("google-chrome") or "", shutil.which("google-chrome-stable") or "", shutil.which("chromium") or ""]
 
 
+def _run_chrome(cmd, timeout):
+    """Headless Chrome through the audit tests' launcher, loaded by path: one copy of the
+    macOS code-sign-clone retry (BL-653) for every headless-Chrome test helper."""
+    import importlib.util
+    path = pathlib.Path(__file__).resolve().parents[3] / "tools" / "ts-cli" / "tests" / "report_browser.py"
+    spec = importlib.util.spec_from_file_location("_report_browser_shared", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.run_chrome(cmd, timeout=timeout)
+
+
 def find_chrome() -> str | None:
     return next((c for c in CHROMES if c and pathlib.Path(c).exists()), None)
 
@@ -42,8 +53,8 @@ def run(realm: str, site: pathlib.Path, port: int, chrome: str, profile: pathlib
     url = f"http://127.0.0.1:{port}/{pack.publish_path}/{'' if home else 'explore/'}#smoke={realm}"
     # CI's Ubuntu runners don't allow Chrome's sandbox (user namespaces); the page is our own local build.
     ci = ["--no-sandbox"] if os.environ.get("GITHUB_ACTIONS") == "true" else []
-    out = subprocess.run([chrome, "--headless=new", "--enable-unsafe-swiftshader", *ci, f"--user-data-dir={profile}",
-                          "--virtual-time-budget=180000", "--dump-dom", url], capture_output=True, text=True, timeout=300)
+    out = _run_chrome([chrome, "--headless=new", "--enable-unsafe-swiftshader", *ci, f"--user-data-dir={profile}",
+                          "--virtual-time-budget=180000", "--dump-dom", url], timeout=300)
     m = re.search(r'<pre[^>]*id="log"[^>]*>(.*?)</pre>', out.stdout, re.S)
     return html.unescape(m.group(1)).splitlines() if m else [f"ERROR no log in the page ({out.stderr[-300:]!r})"]
 
@@ -57,8 +68,8 @@ def old_link_problems(port: int, chrome: str, profile: pathlib.Path, data: dict)
     realm = data["realms"][1]["id"]
     url = f"http://127.0.0.1:{port}/{pack.publish_path}/#realm={realm}&from=explore"
     ci = ["--no-sandbox"] if os.environ.get("GITHUB_ACTIONS") == "true" else []
-    out = subprocess.run([chrome, "--headless=new", *ci, f"--user-data-dir={profile}", "--virtual-time-budget=10000",
-                          "--dump-dom", url], capture_output=True, text=True, timeout=120)
+    out = _run_chrome([chrome, "--headless=new", *ci, f"--user-data-dir={profile}", "--virtual-time-budget=10000",
+                          "--dump-dom", url], timeout=120)
     dom = out.stdout
     problems = []
     if 'id="quest-data"' not in dom:
@@ -76,8 +87,8 @@ def touch_problems(port: int, chrome: str, profile: pathlib.Path, data: dict) ->
     url = f"http://127.0.0.1:{port}/{pack.publish_path}/{'' if home else 'explore/'}"
     ci = ["--no-sandbox"] if os.environ.get("GITHUB_ACTIONS") == "true" else []
     coarse = "--blink-settings=primaryPointerType=2,availablePointerTypes=2,primaryHoverType=1,availableHoverTypes=1"
-    out = subprocess.run([chrome, "--headless=new", *ci, coarse, f"--user-data-dir={profile}", "--virtual-time-budget=10000",
-                          "--dump-dom", url], capture_output=True, text=True, timeout=120)
+    out = _run_chrome([chrome, "--headless=new", *ci, coarse, f"--user-data-dir={profile}", "--virtual-time-budget=10000",
+                          "--dump-dom", url], timeout=120)
     words = data["pack"]["strings"]
     want = html.escape(words["explore_help_touch"], quote=False)
     if want not in out.stdout:

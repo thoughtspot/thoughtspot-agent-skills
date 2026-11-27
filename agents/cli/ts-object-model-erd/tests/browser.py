@@ -25,6 +25,19 @@ window.addEventListener("load",function(){setTimeout(function(){
 </script>"""
 
 
+def _shared():
+    """The audit tests' Chrome launcher, loaded by path: one copy of the macOS
+    code-sign-clone retry (BL-653) for every headless-Chrome test helper."""
+    import importlib.util
+    import pathlib
+    path = (pathlib.Path(__file__).resolve().parents[4]
+            / "tools" / "ts-cli" / "tests" / "report_browser.py")
+    spec = importlib.util.spec_from_file_location("_report_browser_shared", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def probe(html_path, js_body, tmp_path, hash=""):
     src = open(html_path, encoding="utf-8").read()
     head, sep, tail = src.rpartition("</body>")
@@ -36,7 +49,9 @@ def probe(html_path, js_body, tmp_path, hash=""):
            "--user-data-dir=%s" % profile, "--window-size=1400,900",
            "--virtual-time-budget=5000", "--dump-dom",
            page.resolve().as_uri() + (("#" + hash) if hash else "")]
-    dom = subprocess.run(cmd, capture_output=True, text=True, timeout=90).stdout
+    run = _shared().run_chrome(cmd, timeout=90)
+    dom = run.stdout
     m = re.search(r'<pre id="__probe">(.*?)</pre>', dom, re.S)
-    assert m, "probe produced no output; DOM head: %r" % dom[:500]
+    assert m, "probe produced no output; Chrome exit %s after %s launch(es); DOM head: %r; " \
+              "stderr tail: %r" % (run.returncode, run.attempts, dom[:500], run.stderr[-600:])
     return json.loads(html.unescape(m.group(1)))
