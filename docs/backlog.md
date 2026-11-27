@@ -18577,7 +18577,7 @@ PR #517 keeps the inputs its quote-aware argument splitter newly lets through (a
 
 ## BL-611 — `translate_dax` rewrites text inside DAX string literals and column names, so a filter on a string holding `[Col]`, `&&` or `NOT` matches a different value, labelled Migrated `Tier 2`
 
-**Filed:** 2026-11-19. **Source:** the PR #517 round-6 review, and two finds the PR's author reported in the same thread. All four are on `main` for text the earlier splitter read. PR #517 lets none of them through further: a call the earlier splitter reads differently stays NEEDS REVIEW (`_legacy_reads_differently`), so a string with a comma inside a call, or a multi-member IN set inside a call, still refuses as on main; and a gated measure is refused when an earlier rewrite changed one of its string literals.
+**Filed:** 2026-11-19. **Source:** the PR #517 round-6 review, and two finds the PR's author reported in the same thread. All four are on `main` for text the earlier splitter read. PR #517 lets none of them through further: text the earlier splitter reads differently at a call the translator splits (`IF`, `AND`, `OR`, `DIVIDE`, `ROUND`, `CEILING`, `FLOOR`, `CALCULATE`) stays NEEDS REVIEW (`_legacy_reads_differently`, `_split_reads_differently`), and a gated measure is refused when an earlier rewrite changed one of its string literals. Calls the translator does not split are exposed as on main: `CONCATENATE(T[Last], ",  ")` gives `concat([T::Last], ', ')`, a wrong literal, on both.
 
 **What.** Three passes in `ts_cli/powerbi/functions.py` run regex replacements over the whole expression, quoted text included, after the literals have been converted. Each one changes the value a string compares against or the column a reference names, and the result is labelled Migrated:
 
@@ -20076,7 +20076,12 @@ fuzz against `main`), which found no remaining blocker. **Target:** 2027-01-31.
    `CONCATENATE`, `DIVIDE`, `ROUND`, `LEN`, `SIGN` or `UPPER`. Migrated on `main` and on the branch;
    most should fail ThoughtSpot's type check. BL-610 states the limit. Either refuse a set inside any
    call other than the condition of `IF`, or probe what these compile to.
-4. **Test gaps.** Disabling `_split_reads_differently` fails no test: it still changes outcomes,
+4. **The gated literal guard covers literals, not names.** With a measure `M1` and a column
+   named `x[M1`, `CALCULATE(DISTINCTCOUNT(T[x[M1]))` is Approximated as
+   `unique count ( [T::x[formula_M1] ) + …`: `_refs_to_ids` rewrote the name. Loud (the column does
+   not exist, so import fails). Accept a gated result only when `_apply_calculate_rewrites` left the
+   text unchanged, which covers literals and names alike.
+5. **Test gaps.** Disabling `_split_reads_differently` fails no test: it still changes outcomes,
    always toward refusal (`CALCULATE(COUNTROWS(T), T[s] IN {"a"})` is refused, where `main` gives
    `sum_if`). Pin that, or drop it in favour of `_legacy_reads_differently` at the CALCULATE split
    sites. `ISEMPTY` in `_BLANK_TESTS` is untested and unreachable (ISEMPTY takes a table); drop it.
