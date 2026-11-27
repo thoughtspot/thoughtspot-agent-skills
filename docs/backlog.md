@@ -19764,3 +19764,61 @@ predate or sit beside that work. **Target:** 2027-01-31.
 4. **Owner email addresses reach the candidates file.** An owner's display name can be a
    full email address, and it is copied into the CSV and JSON export. Say so in SKILL.md's
    "Candidates file" section, since the file is meant to be shared with owners.
+
+## BL-652 — Child processes of the local test runs find a bare `python3` or `ts` by PATH, not by the chosen interpreter `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** the `pr-ready` review of `fix/checks-python-on-path`.
+**Target:** 2027-01-31.
+
+That PR puts the chosen interpreter's directory first on PATH for the hook's and
+`pr-ready`'s pytest runs, which fixes the case it was raised for: `CHECKS_PYTHON` naming a
+virtual environment, whose `bin/` holds a `python3` that is the same interpreter. Two
+siblings remain:
+
+1. **An interpreter the search chose outside a venv** (no `CHECKS_PYTHON`, Homebrew's
+   `python3.12` with pytest) can sit beside a different `python3` (Homebrew's 3.15, no
+   pyyaml), or in a keg directory with no `python3` at all, so a child's bare `python3`
+   is still the wrong one. Fix: prepend a private temporary directory holding `python3` and
+   `python` wrapper scripts that `exec` the interpreter's absolute path (wrappers, not
+   symlinks, which lose the venv), with a test whose stub directory has a different
+   `python3`.
+2. **`pr-ready --full`'s smoke runs** (`run_checks.py:178`) keep the inherited PATH;
+   `smoke_ts_convert_from_dbt.py:40` and `smoke_ts_convert_to_dbt.py:48` start a bare `ts`,
+   which locally is whatever `ts` is first on PATH, not the venv's.
+
+## BL-653 — Headless-Chrome audit report tests fail intermittently under the full suite `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** two pre-commit runs of the full suite on
+`fix/checks-python-on-path`, each failing one different Chrome-rendering test.
+**Target:** 2026-12-18.
+
+**What.** Under the full suite (~14,000 tests, ~12 minutes), one headless-Chrome test in the
+`ts audit` report fails per run, a different one each time, and the same test passes on
+every rerun alone (3 of 3, and 31 of 31 for its file):
+
+- `tools/ts-cli/tests/test_audit_formula_tree.py::test_links_carry_an_awkward_guid_verbatim`
+  — "the page produced no probe output; DOM head: ''" (an empty DOM).
+- `tools/ts-cli/tests/test_audit_model_nav.py::test_the_routes_reports_already_link_to_still_work[formulas/m-1/graph-v-formulas-formulas, columns and parameters]`.
+
+**Why it matters.** A flaky gate costs a ~12-minute rerun of the hook per hit, and teaches
+people to reach for `--no-verify` (it did, once, on 2026-11-27). If CI hits it too, it
+blocks merges.
+
+**First step.** Find the shared mechanism (`report_browser`, the Chrome invocation: a
+fixed timeout, a shared profile or port, load from a busy machine) and make the wait
+deterministic rather than raising a timeout.
+
+**Update (2026-11-27): cause found, main case fixed.** With an everyday Chrome open, macOS
+runs each headless launch from a temporary "code-sign clone" of the app bundle, which
+Chrome creates and removes; now and then a launch lands in a clone whose framework is gone
+and dyld aborts it (`rc=-6`, empty stdout, `Library not loaded … code_sign_clone` on
+stderr). Reproduced with 8 parallel runs of the 15 Chrome test files under CPU load: 8
+failures, all this signature. `report_browser.render` now retries only that signature (up
+to 3 launches) and reports Chrome's exit code and stderr when it fails; the same stress
+run then gave 0 clone-race failures (4 launches recovered). The ERD tests' `browser.py` and
+the quest smoke `smoke_explore.py` launch Chrome through the same `run_chrome`, loaded by path,
+so every headless-Chrome test helper gets the retry. A hang now fails with Chrome's stderr tail
+instead of a bare `TimeoutExpired`. **Still open:** one render in
+about 3,500 hung to the 120 s timeout under that extreme load (8 suites plus 4 CPU
+burners), far beyond a normal hook or CI run. Not retried, since a retry on timeout would
+also hide a genuine hang; revisit if it is seen at normal load.
