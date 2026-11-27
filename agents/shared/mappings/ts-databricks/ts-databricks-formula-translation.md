@@ -916,6 +916,8 @@ formula equivalents:
 | `AGG(x) FILTER (WHERE cond)` | `agg_if ( cond , [x] )` — native `*_if` function; see Conditional Aggregates section. Applies to **every** aggregate call in an expression, e.g. `SUM(a) FILTER (WHERE c) / NULLIF(SUM(b), 0)` → `safe_divide ( sum_if ( c , [a] ) , sum ( [b] ) )` (BL-316, 2026-09-28) |
 | `SUM(SUM(x)) OVER ()` | `group_aggregate ( sum ( [x] ) , { } , query_filters ( ) )` — grand total of the result rows, filters kept (share-of-total denominators). Only an empty `OVER ()`, and only SUM of SUM/COUNT, MIN of MIN, MAX of MAX. The argument must be exactly one aggregate call — `SUM(SUM(a)/SUM(b)) OVER ()` is refused. Live-verified 2026-09-28 (BL-316) |
 | `SUM(x) OVER (PARTITION BY dim)` | `group_aggregate(sum([x]), {[dim]}, query_filters())` — LOD dimension |
+| `MAX(x) OVER ()` as a dimension (whole table) | `group_aggregate ( max ( [x] ) , { } , { } )` — search-filter-blind, model-filter-aware (BL-635; live-verified 2026-11-26) |
+| A dimension `x = <MAX(…) OVER () dimension>` | `sql_bool_op ( "{0} = (SELECT MAX(…) FROM <source fqn> WHERE <MV filter>)" , [x] )` — never the `group_aggregate` comparison, whose SQL is wrong (BL-638; live-verified 2026-11-26) |
 | `MEASURE(name)` | `[name]` — cross-measure reference |
 | `ANY_VALUE(name)` | `[name]` — dimension reference from measure |
 | `MEASURE(a) / ANY_VALUE(b)` | `[a] / [b]` — cross-measure ratio |

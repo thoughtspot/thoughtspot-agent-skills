@@ -27,6 +27,8 @@ from ts_cli.databricks.mv_expr import (
     split_dot_path,
     strip_sql_comments,
 )
+from ts_cli.databricks.mv_latest_period import (
+    PASSTHROUGH_NOTE, names_in, references, translate_latest_period_flag, whole_table_lods)
 from ts_cli.databricks.mv_sql import UntranslatableError, translate_sql_expr
 from ts_cli.sql_forms import sqlf_aggregate_window_values
 from ts_cli.formula_week import week_start_note
@@ -231,6 +233,14 @@ def _with_week_note(annotations: list[dict] | None, ts_expr: str | None) -> list
     return out
 
 
+_WHOLE_TABLE_LOD_NOTE = (
+    "AGG(...) OVER () -> group_aggregate ( … , { } , { } ): one value over the "
+    "whole (MV-filtered) source, blind to the query's grouping and search "
+    "filters (live-verified 2026-11-26 on its own and grouped on). Do not "
+    "compare a row-level value to it in another formula: ThoughtSpot's SQL for "
+    "that flag is wrong (BL-638).")
+
+
 def translate_dimension(dim: dict, tables: dict) -> dict:
     """Translate one parsed dimension. Raises UntranslatableError to skip."""
     kind = dim["kind"]
@@ -253,6 +263,8 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
         raise UntranslatableError(
             f"LOD aggregate '{dim['inner_agg']}' not mapped "
             f"(SUM|COUNT|AVG|MIN|MAX|MEDIAN — ts-databricks-formula-translation.md)")
+    if not dim["partition_by"]:
+        _refuse_dimension_names_in_window(dim)
     # Source columns only: whether Databricks resolves an OVER (PARTITION BY …) name
     # to an earlier dimension is unprobed, so an LOD keeps the pre-BL-629 reading.
     token = _DIM_REFS.set({})
@@ -262,12 +274,32 @@ def _translate_lod(dim: dict, tables: dict) -> dict:
         dims = " , ".join(resolver(p) for p in dim["partition_by"])
     finally:
         _DIM_REFS.reset(token)
+    if not dim["partition_by"]:
+        # BL-635: OVER () is whole-table and blind to the query's filters, as
+        # in Databricks; { } still respects the model filter that build-model
+        # mirrors from the MV filter: (A3), which the window also sees.
+        return _entry(dim["name"], "dimension", "formula", "ATTRIBUTE", dim,
+                      ts_expr=f"group_aggregate ( {agg} ( {inner} ) , {{ }} , {{ }} )",
+                      annotations=[{"kind": "whole_table_lod",
+                                    "detail": _WHOLE_TABLE_LOD_NOTE}])
     ts = (f"group_aggregate ( {agg} ( {inner} ) , {{ {dims} }} , "
           f"query_filters ( ) )")
     return _entry(dim["name"], "dimension", "formula", "ATTRIBUTE", dim,
                   ts_expr=ts,
                   annotations=[{"kind": "lod_filter_asymmetry",
                                 "detail": _LOD_ASYMMETRY_NOTE}])
+
+
+def _refuse_dimension_names_in_window(dim: dict) -> None:
+    """Whether Databricks reads a bare name inside an OVER () argument as an earlier
+    dimension or as the source column is unprobed (BL-629), and the two can differ
+    (a truncated month vs the raw date), so a name that is both is refused."""
+    shadowed = [n for n in names_in(dim["inner_expr"]) if n.casefold() in _DIM_REFS.get()]
+    if shadowed:
+        raise UntranslatableError(
+            f"'{shadowed[0]}' inside the OVER () argument names an earlier dimension; "
+            f"whether Databricks reads it as that dimension or as the source column "
+            f"there is unprobed (BL-629)")
 
 
 def translate_filter(filter_sql: str, tables: dict) -> dict:
@@ -444,6 +476,80 @@ def translate_metric_view(parsed: dict, tables: dict, *,
         _DIM_REFS.reset(token)
 
 
+def _refuse_skipped_earlier_dimension(dim: dict, parsed: dict,
+                                      lods: dict[str, dict]) -> None:
+    """An OVER () dimension, or a flag reading one, that names an earlier dimension the
+    converter skipped would fall through to the same-named source column, which that
+    dimension shadows in Databricks — silently, in these two paths (BL-638 review)."""
+    whole = dim["kind"] == "lod_window" and not dim["partition_by"]
+    if not whole and not (dim["kind"] == "computed" and references(dim["expr"], lods)):
+        return
+    earlier = []
+    for d in parsed["dimensions"]:
+        if d is dim:
+            break
+        earlier.append(str(d["name"]).casefold())
+    skipped = set(earlier) - set(_DIM_REFS.get())
+    hit = [n for n in names_in(dim["inner_expr"] if whole else dim["expr"])
+           if n.casefold() in skipped]
+    if hit:
+        raise UntranslatableError(
+            f"'{hit[0]}' names an earlier dimension that was skipped; it would fall "
+            f"through to the same-named source column, which that dimension shadows "
+            f"in Databricks")
+
+
+def _translate_dimension_in_mv(dim: dict, parsed: dict, tables: dict,
+                               lods: dict[str, dict]) -> dict:
+    """translate_dimension, except a flag comparing a row to an earlier whole-table
+    OVER () dimension, which becomes a scalar subquery (BL-638)."""
+    _refuse_skipped_earlier_dimension(dim, parsed, lods)
+    if dim["kind"] == "computed":
+        named = [n for n in references(dim["expr"], lods) if n in _DIM_REFS.get()]
+        if named:
+            resolver = make_resolver(tables)
+            ts = translate_latest_period_flag(
+                dim, parsed, lods, lambda e: translate_sql_expr(e, resolver))
+            return _entry(dim["name"], "dimension", "formula", "ATTRIBUTE", dim,
+                          ts_expr=ts, annotations=[{"kind": "subquery_passthrough",
+                                                    "detail": PASSTHROUGH_NOTE.format(
+                                                        lod=lods[named[0]]["name"])}])
+    entry = translate_dimension(dim, tables)
+    # Fail closed: whatever the expression's form, a dimension whose translation
+    # still reads a whole-table LOD is the comparison BL-638 found wrong.
+    leaked = [lods[n]["name"] for n, ref in _DIM_REFS.get().items()
+              if n in lods and ref in (entry.get("ts_expr") or "")]
+    if leaked:
+        raise UntranslatableError(
+            f"dimension '{dim['name']}' reads the whole-table OVER () dimension "
+            f"'{leaked[0]}' in a form not emitted as a subquery; the group_aggregate "
+            f"comparison gives wrong numbers in ThoughtSpot (BL-638)")
+    return entry
+
+
+_LOD_IN_MEASURE_NOTE = (
+    "references the whole-table '{lod}' ({ref}). A row compared to it in a "
+    "dimension gives wrong numbers in ThoughtSpot (BL-638); inside a measure this is "
+    "unverified, so check its numbers against the Metric View.")
+
+
+def _flag_measures_on_whole_table_lods(translated: list[dict], lods: dict[str, dict],
+                                       visible: dict[str, str],
+                                       by_name: dict[str, dict]) -> None:
+    refs = {visible[n]: lods[n]["name"] for n in lods if n in visible}
+    # ANY_VALUE(latest) inlines the LOD's own text rather than its reference
+    refs.update({by_name[lods[n]["name"]]["ts_expr"]: lods[n]["name"]
+                 for n in lods if n in visible and lods[n]["name"] in by_name})
+    for entry in translated:
+        if entry.get("role") != "measure":
+            continue
+        for ref, name in refs.items():
+            if ref in (entry.get("ts_expr") or ""):
+                entry["annotations"].append({"kind": "pending_verification",
+                                             "detail": _LOD_IN_MEASURE_NOTE.format(
+                                                 lod=name, ref=ref)})
+
+
 def _translate_metric_view(parsed: dict, tables: dict, allow_row_lag: bool) -> dict:
     translated: list[dict] = []
     skipped: list[dict] = []
@@ -453,8 +559,9 @@ def _translate_metric_view(parsed: dict, tables: dict, allow_row_lag: bool) -> d
     window_measures: list[str] = []
 
     visible = _DIM_REFS.get()  # the dict set for this run, filled in place
+    lods = whole_table_lods(parsed)
     for dim in parsed["dimensions"]:
-        _translate_item(lambda: translate_dimension(dim, tables),
+        _translate_item(lambda: _translate_dimension_in_mv(dim, parsed, tables, lods),
                         dim["name"], "dimension",
                         translated, skipped, by_name, skip_names)
         if dim["name"] in by_name and dim["name"] not in skip_names:
@@ -491,6 +598,7 @@ def _translate_metric_view(parsed: dict, tables: dict, allow_row_lag: bool) -> d
     _translate_cross_measures(deferred, parsed, tables, translated, skipped,
                               by_name, skip_names, window_measures, allow_row_lag)
 
+    _flag_measures_on_whole_table_lods(translated, lods, visible, by_name)
     filter_out = None
     total = len(parsed["dimensions"]) + len(parsed["measures"])
     if parsed["filter"] is not None:

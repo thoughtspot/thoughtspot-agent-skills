@@ -375,9 +375,9 @@ are roughly ordered by value÷effort.
 | BL-580 | Step 7's "rerun when formulas are filtered" explanation is wrong: a same-batch dependency is rewritten and kept, not filtered, so the "retry once" advice fixes nothing in that case | next Tableau skill touch that reaches Step 7, or 2026-12-31 |
 | BL-629 | from-databricks-mv: a dimension referencing another dimension is emitted as a nonexistent table column; lint does not check formula exprs — converter fixed 2026-11-27; lint XREF over `formulas[].expr` still open | 2026-12-15 |
 | ~~BL-630~~ | ~~from-databricks-mv: a display-title clash between a column and a formula silently drops the column~~ | DONE (2026-11-27) |
-| BL-634 | from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped | 2026-12-15 |
+| ~~BL-634~~ | ~~from-databricks-mv: a window ordered by `TO_DATE(CAST(int_key AS STRING), 'yyyyMMdd')` is refused; semi-additive measures skipped~~ | DONE (2026-11-27) |
 | BL-637 | from-databricks-mv (and SV): arithmetic over `first_value`/`last_value` fails import; each call must be wrapped in `sum ( )` — Databricks fixed 2026-11-27; Snowflake id form and a lint rule still open | 2026-12-15 |
-| BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` | 2026-12-15 |
+| BL-638 | A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers: grouping by it fans out, filtering on it breaks `first_value`/`last_value` — converter emits the subquery 2026-11-27; raising the SQL defect with the query team remains | 2026-12-15 |
 | BL-639 | from-databricks-mv: no numeric fidelity step; lint and import both passed Models that return wrong numbers — add `ts databricks verify` | 2026-12-15 |
 | BL-640 | Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved | 2026-12-15 |
 | BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
@@ -535,7 +535,7 @@ are roughly ordered by value÷effort.
 | ~~BL-625~~ | ~~ts-audit Dashboard: sort and filter Models by usage~~ | RESOLVED (2026-11-26 — absorbed by the Usage view, ts-audit 3.28.0) |
 | BL-631 | from-databricks-mv: `display_title` title-cases names without display_name (`SKU Type` -> `Sku Type`) | 2027-01-31 |
 | BL-633 | `CAST(col AS STRING)` is dropped, including inside a `TO_DATE` pass-through | 2027-01-31 |
-| BL-635 | from-databricks-mv: whole-table dimension `MAX(expr) OVER ()` rejected as an unsupported LOD shape | 2027-01-31 |
+| ~~BL-635~~ | ~~from-databricks-mv: whole-table dimension `MAX(expr) OVER ()` rejected as an unsupported LOD shape~~ | DONE (2026-11-27) |
 | BL-636 | from-databricks-mv file-only path has no route when the warehouse cannot be described (column types must be inferred) | 2027-01-31 |
 | BL-641 | from-databricks-mv: no entry point for Metric View YAML files without workspace access | 2027-01-31 |
 | BL-642 | from-databricks-mv: converting several MVs over shared tables needs one table set and one import plan | 2027-01-31 |
@@ -577,6 +577,7 @@ are roughly ordered by value÷effort.
 | BL-440 | ThoughtSpot formula output built as text, precedence repaired afterwards — move to a tree + printer (after BL-441) | after BL-441 |
 | BL-643 | from-databricks-mv: offer one combined Model when several MVs were split only by the chasm trap (parked 2026-11-26) | user request to resume |
 | BL-656 | pytest-xdist PR review leftovers: `_NO_XDIST` match, worker count in evidence, CHANGELOG figures, untested Chrome call sites | 2027-01-31 |
+| BL-660 | Tableau: `[Date] = {FIXED : MAX([Date])}` emits the row-vs-whole-table `group_aggregate` comparison BL-638 found wrong | 2027-01-31 |
 
 ---
 
@@ -19337,7 +19338,7 @@ as the literal `CAST({0} AS STRING)` inside a pass-through template. Remove `STR
 
 ## BL-634 — from-databricks-mv: a window ordered by a date built from an integer key is refused, so semi-additive measures on it are skipped `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.227.1: a `yyyyMMdd`/`yyyyMM` integer-key date orders the window by the key; `range: current` without an offset only). **Source:** as BL-629. **Target:** 2026-12-15.
 
 **What.** Warehouses with integer date keys commonly order a semi-additive window by a
 derived date:
@@ -19370,7 +19371,7 @@ ordered by a formula needs a live check first.
 
 ## BL-635 — from-databricks-mv: a whole-table dimension `MAX(<expr>) OVER ()` is rejected as an unsupported LOD shape `Tier 3`
 
-**Filed:** 2026-11-26. **Source:** as BL-629. **Target:** 2027-01-31.
+**Filed:** 2026-11-26. **Status:** DONE (2026-11-27, ts-cli 0.227.1: `AGG(expr) OVER ()` → `group_aggregate ( … , { } , { } )`). **Source:** as BL-629. **Target:** 2027-01-31.
 
 **What.** `Latest Data Month: MAX(TO_DATE(…)) OVER ()`, the latest loaded period used to
 flag a partial month-to-date, fails `parse-mv` with "window function without the
@@ -19449,7 +19450,7 @@ converter output linted clean and only the import caught it.
 
 ## BL-638 — A flag comparing a row to a whole-table `group_aggregate` gives wrong numbers in ThoughtSpot `Tier 2`
 
-**Filed:** 2026-11-26. **Source:** as BL-637. **Target:** 2026-12-15.
+**Filed:** 2026-11-26. **Status:** PARTIAL (2026-11-27, ts-cli 0.227.1: fix direction (b) done — the converter emits the subquery pass-through for one comparison against a `MAX`/`MIN` `OVER ()` dimension over source columns, skips any other expression naming it, and notes a measure naming it as unverified. Open: (a) raise the SQL generation defect with the query team; whether a measure such as `SUM(x) FILTER (WHERE period = latest_period)` is also affected is unprobed). **Source:** as BL-637. **Target:** 2026-12-15.
 
 **What.** An MV dimension such as `is_partial_period: period = latest_period`, where
 `latest_period` is `MAX(period) OVER ()`, converts to
@@ -20085,3 +20086,24 @@ fuzz against `main`), which found no remaining blocker. **Target:** 2027-01-31.
    always toward refusal (`CALCULATE(COUNTROWS(T), T[s] IN {"a"})` is refused, where `main` gives
    `sum_if`). Pin that, or drop it in favour of `_legacy_reads_differently` at the CALCULATE split
    sites. `ISEMPTY` in `_BLANK_TESTS` is untested and unreachable (ISEMPTY takes a table); drop it.
+
+---
+
+## BL-660 — Tableau: a row compared to a whole-table FIXED LOD emits the comparison BL-638 found wrong `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** review of PR #770 (BL-638's sibling in another converter). **Target:** 2027-01-31.
+
+**What.** The common Tableau latest-date idiom `[Order Date] = {FIXED : MAX([Order Date])}`
+converts (`tools/ts-cli/ts_cli/tableau/lod.py`, the FIXED branch) to
+`[Order Date] = group_aggregate ( MAX([Order Date]) , {} , {} )`. BL-638 found that
+ThoughtSpot's SQL for a row compared with a whole-table `group_aggregate` is wrong
+(grouped on, the join fans out; filtered on, `first_value`/`last_value` partition by the
+period), and that the formula's form is not the cause. The Databricks converter now emits
+a scalar subquery instead (PR #770); the Tableau converter does not.
+
+**Not yet verified** that this exact Tableau form hits the defect: it follows from BL-638
+and was not re-probed.
+
+**Done when.** A live probe on a two-table fixture confirms or refutes the defect for the
+Tableau form; if confirmed, the converter emits a faithful form (a subquery needs the
+source table's FQN, which a Tableau datasource may not give) or skips with the reason.
