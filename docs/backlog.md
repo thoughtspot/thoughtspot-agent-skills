@@ -382,6 +382,7 @@ are roughly ordered by value÷effort.
 | ~~BL-640~~ | ~~Conversion skills: a workaround that changes a formula's meaning must be listed at the review checkpoint and approved~~ | DONE (2026-11-27) |
 | BL-657 | Table column `name` vs `db_column_name`: `ts tml lint` resolves a Model `column_id` against either (import accepts only `name`), and merge mode can bind a bare ref to the wrong column | 2026-12-15 |
 | BL-658 | Sisense `--target-model`: one join-tree comparison per tile in place of the per-case path checks | 2027-01-31 |
+| BL-665 | Sisense `--target-model`: a formula-only column chart is emitted with no `axis_configs`; plus #746 report follow-ups | 2026-12-18 |
 
 ### Tier 3 — Opportunistic
 
@@ -20202,3 +20203,39 @@ Items 1, 2, 4 and 5 predate #771. Item 3 is a regression #771 introduced (base c
    within tolerance, since at DECIMAL scale it also absorbs a dropped `ROUND` or narrowing cast.
 
 **Done when.** Each item is fixed with its test, or declined here with the reason.
+
+---
+
+## BL-665 — Sisense `--target-model`: a formula-only column chart is emitted with no `axis_configs`; #746 report follow-ups `Tier 2`
+
+**Filed:** 2026-11-27. **Source:** the maintainer review of PR #746 (the one-page HTML migration
+report), which requested changes. **Target:** 2026-12-18.
+
+**Converter bug (the reason this is Tier 2).** On the `--target-model` path, a column chart whose
+only value is a Sisense formula is emitted with no `axis_configs`. `ts tml lint` flags it ("Generate
+the tile with the converter's build-liveboard, not by hand"), and the tile renders blank. #746 worked
+around it in SKILL.md by holding the tile back from import; the review asked for that sentence to go,
+because the fix belongs in the converter (`.claude/rules/ts-cli.md`). Fix it in
+`ts_cli/sisense/` so the tile is either built with valid axes or reported NEEDS REVIEW and left out
+by the converter itself, with a test on a formula-only column chart.
+
+**Report follow-ups #746 may leave for later** (the review did not block on these):
+1. `render_report_html.py`'s `target_model_text` re-implements `commands/sisense.py:_load_tml`; on
+   the `--parse` export shape it reports "0 table instances … 0 columns, 0 formulas". Reuse the
+   loader.
+2. Its `REASONS` table is a second hand-kept copy of the converter's NEEDS REVIEW wording, with no
+   gate keeping the two in step. Group by a reason code the converter emits, or drop the table.
+3. The bundle, the report and the Liveboard TML are never checked against each other: with a
+   reused out-dir, a page titled "Acme Visits" showed "What shipped: Zeta Board".
+4. The reconcile check marks a match within an unstated 1%. State the tolerance on the page, or
+   compare exactly.
+5. The documented command needs the skill directory and PyYAML, which `python3` lacks when ts-cli is
+   a uv tool. A `ts sisense` command would settle this and items 1 to 2.
+6. Smaller: the footer's "(N rows)" is the NEEDS REVIEW count; "Listed below with the reason" shows
+   no reason; `--board-url` accepts `javascript:`; "Filter bar ✓ N chips" ticks whatever the chips'
+   status; `fmt(None)` prints "None".
+7. The converter's report rows carry no widget oid, so the report can only match widgets to tiles by
+   title. Add the oid to each row.
+
+**Done when.** The converter bug is fixed with its test, and each report item is fixed (in #746 or
+after it) or declined here with the reason.
