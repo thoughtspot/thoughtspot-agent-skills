@@ -31,7 +31,7 @@ jobs:
 
       - name: Install test/runtime deps
         run: |
-          pip install pytest pyyaml radon pip-audit jsonschema==4.25.1
+          pip install pytest pyyaml radon pip-audit jsonschema==4.25.1 pytest-xdist==3.8.0
           pip install -e tools/ts-cli
 
       - name: Install optional extras for audit coverage
@@ -154,10 +154,17 @@ jobs:
         # (ImportPathMismatchError / "Plugin already registered under a different
         # name"). tools/validate/tests has no __init__.py, so it can safely share
         # an invocation with tools/ts-cli/tests.
+        #
+        # `-n auto` (pytest-xdist): one worker per CPU, 4 on a hosted runner. Serial, the
+        # first invocation took 8.5 minutes locally on 2026-11-27 (14,023 tests); at 4
+        # workers, 3.
+        # Every test still runs. A test that shares state with another (a fixed path, the
+        # working directory, an environment variable it leaves set) can fail here when it
+        # passed serially: give it its own tmp_path or monkeypatch, never `-p no:xdist`.
         if: ${{ !cancelled() }}
         run: |
-          pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/quest/tests/ tools/pr-metrics/tests/ -q
-          pytest agents/cli/ts-object-model-erd/tests/ -q
+          pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/quest/tests/ tools/pr-metrics/tests/ -q -n auto
+          pytest agents/cli/ts-object-model-erd/tests/ -q -n auto
 
       - name: Check the CI gate covers every job
         # The aggregate `validate` job is only a gate if every non-schedule job is in its
@@ -244,14 +251,14 @@ jobs:
 
       - name: Install test/runtime deps
         run: |
-          pip install pytest pyyaml jsonschema==4.25.1
+          pip install pytest pyyaml jsonschema==4.25.1 pytest-xdist==3.8.0
           pip install -e tools/ts-cli
 
       - name: Run unit + validator tests
         # Same two invocations as `suite` (see that job for why they're split).
         run: |
-          pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/quest/tests/ tools/pr-metrics/tests/ -q
-          pytest agents/cli/ts-object-model-erd/tests/ -q
+          pytest tools/ts-cli/tests/ tools/validate/tests/ tools/ossie-roundtrip/tests/ tools/formula-fidelity/tests/ tools/agentql-retest/tests/ tools/quest/tests/ tools/pr-metrics/tests/ -q -n auto
+          pytest agents/cli/ts-object-model-erd/tests/ -q -n auto
 
   # THE REQUIRED STATUS CHECK. Branch protection requires exactly one context on `main`,
   # and before this job that context was the single-interpreter suite — so a red
