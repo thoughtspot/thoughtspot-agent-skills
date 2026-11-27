@@ -19808,6 +19808,21 @@ blocks merges.
 fixed timeout, a shared profile or port, load from a busy machine) and make the wait
 deterministic rather than raising a timeout.
 
+**Update (2026-11-27): cause found, main case fixed.** With an everyday Chrome open, macOS
+runs each headless launch from a temporary "code-sign clone" of the app bundle, which
+Chrome creates and removes; now and then a launch lands in a clone whose framework is gone
+and dyld aborts it (`rc=-6`, empty stdout, `Library not loaded … code_sign_clone` on
+stderr). Reproduced with 8 parallel runs of the 15 Chrome test files under CPU load: 8
+failures, all this signature. `report_browser.render` now retries only that signature (up
+to 3 launches) and reports Chrome's exit code and stderr when it fails; the same stress
+run then gave 0 clone-race failures (4 launches recovered). The ERD tests' `browser.py` and
+the quest smoke `smoke_explore.py` launch Chrome through the same `run_chrome`, loaded by path,
+so every headless-Chrome test helper gets the retry. A hang now fails with Chrome's stderr tail
+instead of a bare `TimeoutExpired`. **Still open:** one render in
+about 3,500 hung to the 120 s timeout under that extreme load (8 suites plus 4 CPU
+burners), far beyond a normal hook or CI run. Not retried, since a retry on timeout would
+also hide a genuine hang; revisit if it is seen at normal load.
+
 ## BL-654 — Test-suite time: pre-commit in parallel, a lighter matrix, heavy areas by path `Tier 3`
 
 **Filed:** 2026-11-27. **Source:** the pytest-xdist PR (CI's pytest lines run `-n auto`). **Target:** 2027-01-31.
@@ -19848,24 +19863,18 @@ copies of them) and move it deliberately.
 **Filed:** 2026-11-27. **Source:** the `pr-ready` review of `feat/pytest-parallel` (no
 Blockers; these were triaged out of the PR). **Target:** 2027-01-31.
 
-1. **One `_dump_dom`, tested once, at every call site.** Three byte-identical copies
-   (`tools/ts-cli/tests/report_browser.py`, `agents/cli/ts-object-model-erd/tests/browser.py`,
-   `tools/quest/tests/smoke_explore.py`); the ERD copy has no test, and the retry tests call
-   the helper directly, so a call site reverted to a bare `subprocess.run` passes them all.
-2. **The retry condition is broader than its docstrings.** Any non-zero exit with empty
-   stdout is retried; `--dump-dom` prints only at the end of the virtual-time budget, so a
-   renderer crash after the page loaded is retried once too. Narrow it to the startup crash
-   (exit -6 with dyld on stderr) or reword the docstrings and `CHANGELOG.md`.
-3. **`_NO_XDIST` in `tools/validate/pr_ready.py` matches anywhere in the output, at any exit
+1. **`_NO_XDIST` in `tools/validate/pr_ready.py` matches anywhere in the output, at any exit
    code.** A failing test that quotes pytest's usage line is reported as "pytest-xdist is not
    installed". Require exit 4 and anchor to `^\S*pytest: error: unrecognized arguments:`;
    the note header still says "tests skipped for a missing module" for that case.
-4. **The evidence's "Not reproduced locally" list omits the worker count** (local: one per
+2. **The evidence's "Not reproduced locally" list omits the worker count** (local: one per
    CPU; CI: 4).
-5. **BL-653 says nothing of the startup crash this PR found and retries** (Chrome aborts in
-   dyld at startup, exits -6, prints nothing). Add a dated line, and check whether its
-   `test_audit_model_nav.py` failure is the same crash.
-6. **`CHANGELOG.md` 2026-11-27 figures:** "about 2 minutes at 18 workers" (the evidence run
+3. **`CHANGELOG.md` 2026-11-27 figures:** "about 2 minutes at 18 workers" (the evidence run
    took 187 s) and "needs `pytest-xdist==3.8.0`" (any xdist with `-n` works; 3.8.0 is CI's pin).
+
+The review's Chrome-retry points (three `_dump_dom` copies, the ERD copy untested, a retry
+condition broader than its docstrings, BL-653 not updated) were overtaken by #768, which
+merged first: one `run_chrome` in `report_browser.py` retrying only the code-sign-clone
+signature, used by every headless-Chrome helper. This PR took #768's version.
 
 **Done when.** Each is fixed or declined with its reason here.
