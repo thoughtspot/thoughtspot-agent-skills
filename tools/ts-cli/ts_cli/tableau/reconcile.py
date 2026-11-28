@@ -117,23 +117,131 @@ def clean_column_name(name: str | None) -> str | None:
     return cleaned or None
 
 
-def strip_suffix_in_expr(expr: str) -> str:
-    return _SUFFIX.sub("", expr)
+def bound_suffixed_columns(
+    columns: list[dict], warehouse_columns: set[str] | None,
+) -> set[str]:
+    """Upper-cased suffixed column names the target warehouse table really has.
+
+    A published datasource that joins several Custom SQL queries server-side
+    disambiguates a repeated column with a ``(Custom SQL Query N)`` suffix:
+    ``LEVEL`` and ``LEVEL (Custom SQL Query8)`` are different columns holding
+    different data. When the datasource is landed as one flattened table that
+    keeps those names, the suffixed column must stay a column of its own;
+    stripping the suffix would collapse it onto ``LEVEL`` and every formula that
+    read it would silently read the other column.
+
+    Returns the names (upper-cased, for a case-insensitive compare) of parsed
+    columns that carry the suffix AND exist verbatim in ``warehouse_columns``.
+    Empty when ``warehouse_columns`` is None or empty, which keeps the default
+    strip-everything behaviour for callers that do not know the target schema.
+    """
+    if not warehouse_columns:
+        return set()
+    wh_upper = {w.upper() for w in warehouse_columns}
+    bound: set[str] = set()
+    for c in columns:
+        raw = c.get("db_column_name") or c.get("name") or ""
+        if _SUFFIX.search(raw) and raw.upper() in wh_upper:
+            bound.add(raw.upper())
+    return bound
 
 
-def clean_columns(columns: list[dict], table_name: str) -> list[dict]:
+_REF = re.compile(r"\[([^\]]+)\]")
+
+
+def _ref_column(ref: str) -> str:
+    """The column part of a bracketed ref body: after the last ``::`` if qualified."""
+    return ref.rsplit("::", 1)[-1]
+
+
+def has_unbound_suffixed_ref(expr: str, bound: set[str] | None = None) -> bool:
+    """True when ``expr`` mentions a ``(Custom SQL Query N)`` name that is not bound.
+
+    With no ``bound`` set this is the plain substring test the pre-import
+    validator always used. With one, a ref whose column is a bound suffixed
+    column is a real warehouse column and does not count.
+    """
+    if not bound:
+        return "Custom SQL Query" in expr
+    rest = _REF.sub(
+        lambda m: "" if _ref_column(m.group(1)).upper() in bound else m.group(0),
+        expr,
+    )
+    return "Custom SQL Query" in rest
+
+
+def strip_suffix_in_expr(expr: str, bound: set[str] | None = None) -> str:
+    """Strip ``(Custom SQL Query N)`` suffixes from an expression.
+
+    Refs whose column is in ``bound`` (see ``bound_suffixed_columns``) keep their
+    suffix: they name a real warehouse column. Everything else is stripped
+    exactly as before, so ``bound=None`` is the original behaviour.
+    """
+    if not bound:
+        return _SUFFIX.sub("", expr)
+    kept: list[str] = []
+
+    def _protect(m: re.Match) -> str:
+        if _ref_column(m.group(1)).upper() in bound:
+            kept.append(m.group(0))
+            return f"\x00{len(kept) - 1}\x00"
+        return m.group(0)
+
+    protected = _REF.sub(_protect, expr)
+    stripped = _SUFFIX.sub("", protected)
+    return re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], stripped)
+
+
+def clean_columns(
+    columns: list[dict], table_name: str, bound: set[str] | None = None,
+) -> list[dict]:
+    """Tier-1 single-table cleanup: drop junk, strip suffixes, dedupe, stamp table.
+
+    A column in ``bound`` (upper-cased suffixed names the warehouse really has,
+    from ``bound_suffixed_columns``) keeps its name and ``db_column_name``
+    verbatim and is deduped on that full name, so it survives next to its
+    unsuffixed sibling instead of being collapsed into it. When its caption is
+    also another kept column's name (Tableau lets ``LEVEL`` and
+    ``LEVEL (Custom SQL Query8)`` share the caption ``Level``), it is named by
+    its full suffixed name instead: downstream maps are keyed by column name,
+    so two equal names would bind both Table columns to one warehouse column.
+    """
+    bound = bound or set()
+    out = _clean_columns_pass(columns, table_name, bound)
+    if bound:
+        counts: dict[str, int] = {}
+        for nc in out:
+            key = str(nc["name"]).upper()
+            counts[key] = counts.get(key, 0) + 1
+        for nc in out:
+            if (str(nc["db_column_name"]).upper() in bound
+                    and counts[str(nc["name"]).upper()] > 1):
+                nc["name"] = nc["db_column_name"]
+    return out
+
+
+def _clean_columns_pass(
+    columns: list[dict], table_name: str, bound: set[str],
+) -> list[dict]:
+    """One pass of ``clean_columns``: drop junk, strip unbound suffixes, dedupe."""
     out: list[dict] = []
     seen: set[str] = set()
     for c in columns:
-        db = clean_column_name(c.get("db_column_name") or c.get("name"))
-        if db is None:
-            continue
+        raw = c.get("db_column_name") or c.get("name")
+        if raw and raw.upper() in bound:
+            db = raw
+            display = c.get("name") or raw
+        else:
+            db = clean_column_name(raw)
+            if db is None:
+                continue
+            display = clean_column_name(c.get("name")) or db
         if db in seen:
             continue
         seen.add(db)
         nc = dict(c)
         nc["db_column_name"] = db
-        nc["name"] = clean_column_name(c.get("name")) or db
+        nc["name"] = display
         nc["table"] = table_name
         out.append(nc)
     return out

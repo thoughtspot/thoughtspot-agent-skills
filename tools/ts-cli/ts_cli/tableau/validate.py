@@ -380,12 +380,17 @@ def validate_pre_import(
     translated: list[dict],
     column_names: set[str] | None = None,
     formula_names: set[str] | None = None,
+    bound_suffixed: set[str] | None = None,
 ) -> list[dict]:
     """Pre-import structural validation to catch issues before ThoughtSpot import.
 
     Checks each translated formula for common patterns that cause import failures.
     Returns a list of {name, warnings: [str]} for formulas with issues.
+
+    ``bound_suffixed`` (upper-cased) names ``(Custom SQL Query N)`` columns the
+    target table really has; a ref to one is not an unresolved alias.
     """
+    from ts_cli.tableau.reconcile import has_unbound_suffixed_ref
     column_names = column_names or set()
     formula_names = formula_names or set()
     col_upper = {c.upper() for c in column_names}
@@ -428,7 +433,7 @@ def validate_pre_import(
         warnings.extend(_check_if_then_else_structure(expr, expr_stripped))
 
         # Check for unresolved Custom SQL Query references
-        if "Custom SQL Query" in expr:
+        if has_unbound_suffixed_ref(expr, bound_suffixed):
             warnings.append("Unresolved Custom SQL Query alias")
 
         # Nested group_aggregate is now caught earlier, in validate_output —

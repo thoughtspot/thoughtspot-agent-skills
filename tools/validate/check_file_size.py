@@ -63,7 +63,11 @@ RATCHET: dict[str, tuple[int, str]] = {
     # instead of exiting the process directly, so a failed export on one
     # datasource no longer kills the per-datasource loop before every other
     # datasource's result is printed (round-4 PR #662 review).
-    "tools/ts-cli/ts_cli/commands/tableau.py": (1596, "BL-089"),
+    # 1625 as of ts-cli v0.229.0: --warehouse-columns is plumbed through
+    # build-model's per-datasource flow (option, load, and the bound-suffix set
+    # passed to translate/validate/generate); its logic lives in
+    # tableau/build_model.py, only the wiring is here.
+    "tools/ts-cli/ts_cli/commands/tableau.py": (1625, "BL-089"),
     # The report's largest view: past SOFT_WARN when the gate reached JS (BL-503).
     # Split it into per-tab files when it is next changed; lower this as it shrinks.
     "tools/ts-cli/ts_cli/audit/report/views/objectmap.js": (756, "BL-520"),

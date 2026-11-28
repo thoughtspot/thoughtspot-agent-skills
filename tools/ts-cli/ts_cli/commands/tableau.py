@@ -375,6 +375,18 @@ def _fetch_target_columns(guid: str, profile: str) -> set[str]:
     return {c["name"] for c in tbl.get("columns", [])}
 
 
+def _load_warehouse_columns(path: Optional[str], existing_guid: Optional[str]) -> dict:
+    """Load --warehouse-columns (merge mode reads the live model instead)."""
+    if not path or existing_guid:
+        return {}
+    from ts_cli.tableau.build_model import load_warehouse_columns
+    try:
+        return load_warehouse_columns(path)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise SystemExit(1)
+
+
 def _load_column_name_map(column_name_map: Optional[str]) -> dict[str, str]:
     """Load and validate the --column-name-map JSON file; exits on a bad
     path, a chained mapping, or a convergent mapping. See
@@ -401,6 +413,7 @@ def _translate_and_validate(
     resolved_calcs: list[dict],
     scoped_columns: dict,
     parsed: dict,
+    bound_suffixed: Optional[set] = None,
 ) -> tuple[list, list, list, dict]:
     """Translate a datasource's calculated fields and run pre-import validation.
 
@@ -439,7 +452,7 @@ def _translate_and_validate(
     # Pre-import validation, plus skipped joins prepended (echo below caps at 10).
     col_names = {c["name"] for c in ds["columns"]}
     formula_name_set = {f["name"] for f in translated}
-    validation_issues = join_warning_entries(ds) + validate_pre_import(translated, col_names, formula_name_set)
+    validation_issues = join_warning_entries(ds) + validate_pre_import(translated, col_names, formula_name_set, bound_suffixed)
     if validation_issues:
         typer.echo(f"  Validation warnings: {len(validation_issues)}", err=True)
         for vi in validation_issues[:10]:
@@ -857,6 +870,7 @@ def _generate_flow(
     column_name_map: Optional[dict] = None,
     profile: Optional[str] = None,
     table_registry: Optional[dict] = None,
+    bound_suffixed: Optional[set] = None,
 ) -> dict:
     """Build phased model TML files from scratch and write them to disk."""
     from ts_cli.model_builder import build_model_tml, split_for_phased_import
@@ -881,11 +895,11 @@ def _generate_flow(
     # stamp/dedup (both wrong here, see its docstring).
     if len(ds.get("tables", [])) == 1:
         _table_name = ds["tables"][0]["name"]
-        cleaned_cols = clean_columns(cleaned_cols, _table_name)
+        cleaned_cols = clean_columns(cleaned_cols, _table_name, bound_suffixed)
     else:
         cleaned_cols = drop_junk_columns(cleaned_cols)
     for f in cleaned_formulas:
-        f["expr"] = strip_suffix_in_expr(f["expr"])
+        f["expr"] = strip_suffix_in_expr(f["expr"], bound_suffixed)
 
     # Tier-1 (cont.): drop formulas referencing a now-dropped junk column —
     # must run unconditionally, not just under --reconcile-table.
@@ -1032,6 +1046,7 @@ def _process_datasource(
     database: str = "",
     schema: str = "",
     table_registry: Optional[dict] = None,
+    warehouse_columns: Optional[dict] = None,
 ) -> Optional[dict]:
     """Run the full per-datasource pipeline (translate, merge-or-generate) for
     one TWB datasource. Returns None to signal --reconcile-plan already
@@ -1106,8 +1121,13 @@ def _process_datasource(
         ds["calculated_fields"], ds["calc_map"],
     )
 
+    from ts_cli.tableau.build_model import resolve_bound_suffixed
+    bound_suffixed, _msg = resolve_bound_suffixed(ds, warehouse_columns or {}, existing_tml)
+    if _msg:
+        typer.echo(_msg, err=True)
+
     translated, skipped, validation_issues, name_clashes = _translate_and_validate(
-        ds, resolved_calcs, scoped_columns, parsed,
+        ds, resolved_calcs, scoped_columns, parsed, bound_suffixed,
     )
 
     # Step 3: Resolve name collisions
@@ -1162,6 +1182,7 @@ def _process_datasource(
         column_name_map=col_name_map,
         profile=profile,
         table_registry=table_registry,
+        bound_suffixed=bound_suffixed,
     )
     if result.get("reconcile_plan"):
         # _generate_flow already printed the plan JSON to stdout — signal
@@ -1246,6 +1267,12 @@ def build_model_cmd(
         help="With --reconcile-table: print the reconcile plan (suggested "
              "mappings + drops) as JSON and exit without writing TML.",
     ),
+    warehouse_columns_file: Optional[str] = typer.Option(
+        None, "--warehouse-columns",
+        help="GENERATE mode only. JSON of the target warehouse table's real "
+             "column names; a (Custom SQL Query N) column found there is kept "
+             "as its own column. Shapes: see the README.",
+    ),
     column_name_map: Optional[str] = typer.Option(
         None, "--column-name-map",
         help="JSON file mapping datasource column -> target column name (from "
@@ -1286,6 +1313,7 @@ def build_model_cmd(
 
     name_map = _load_table_name_map(table_name_map, existing_guid)
     col_name_map = _load_column_name_map(column_name_map)
+    wh_columns = _load_warehouse_columns(warehouse_columns_file, existing_guid)
 
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -1352,6 +1380,7 @@ def build_model_cmd(
             database=database,
             schema=schema,
             table_registry=table_registry,
+            warehouse_columns=wh_columns,
         )
         if result is None:
             # --reconcile-plan already printed its JSON — stop without

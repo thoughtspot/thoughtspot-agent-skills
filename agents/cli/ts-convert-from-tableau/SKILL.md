@@ -1106,7 +1106,8 @@ formulas are added independently in Phase 2 via `build-model --existing-guid` **
 `--table-name-map` (optional): a workbook-wide JSON file `{"twb_table_name":
 "thoughtspot_table_name"}`. Supply it **only** when the ThoughtSpot table's TML `name`
 (Step 5a) differs from the TWB relation name (warehouse-normalized names, or a published
-datasource literally named `sqlproxy`); omit when names already match.
+datasource literally named `sqlproxy`); omit when names already match. Real `(Custom SQL Query N)`
+columns on a flattened table: `--warehouse-columns` (Step 5b).
 
 **Published/sqlproxy datasources bound to an existing table/view — reconcile columns.**
 When the datasource binds to a pre-existing ThoughtSpot table/view (the consultant/stand-in
@@ -2514,6 +2515,6 @@ ThoughtSpot lowercases both sides of every string comparison (`=`, `!=`, `in { }
 
 | Version | Date | Summary |
 |---|---|---|
-| 1.47.3 | 2026-11-27 | Step 7 asks for approval of any hand-edited formula whose meaning differs from the source (invariant R1, BL-640). |
+| 1.48.0 | 2026-11-27 | `--warehouse-columns` keeps real suffixed columns (ts-cli v0.229.0). |
 
-**Older entries (v1.0.0–v1.47.2):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history — the operative rules/gotchas from those entries are already reflected in the procedure above.
+**Older entries (v1.0.0–v1.47.3):** see [references/changelog-archive.md](references/changelog-archive.md) for the full history; the procedure above already reflects their rules.

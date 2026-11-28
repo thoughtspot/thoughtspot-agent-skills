@@ -582,6 +582,7 @@ are roughly ordered by value÷effort.
 | BL-662 | MV/SV cast and naming leftovers from PR #771: `to_date` over other date-valued inputs, the Snowflake siblings, a date literal compared with text, `.title()` on digits | 2027-01-31 |
 | BL-663 | R1 and YAML-entry leftovers from PR #772: hand-written formulas for refused constructs, citation drift, Tableau ✅ on an approved change, `read_text()` without an encoding | 2027-01-31 |
 | BL-664 | Follow-ups from PR #773 (`ts databricks verify`): no numeric check in from-snowflake-sv, a falsy AgentQL value read as NULL, partly quoted MV names, three AgentQL quoting helpers | 2027-01-31 |
+| BL-666 | Tableau `--warehouse-columns` review leftovers: multi-table merge binds a suffixed ref to the wrong table, silent no-ops, warehouse spelling, one suffix rule in three regexes, ratchet offset, `verify` after `--table-name-map` | 2027-01-31 |
 
 ---
 
@@ -20239,3 +20240,82 @@ by the converter itself, with a test on a formula-only column chart.
 
 **Done when.** The converter bug is fixed with its test, and each report item is fixed (in #746 or
 after it) or declined here with the reason.
+
+## BL-666 — Tableau `--warehouse-columns`: review leftovers from the CSQ suffixed-column PR `Tier 3`
+
+**Filed:** 2026-11-27. **Source:** pr-ready review of `fix/tableau-csq-suffixed-columns` (the
+`pr-reviewer` and the conversion-consistency auditor, head `034edc88`). **Target:** 2027-01-31.
+
+Most items are a narrower path the flag does not cover yet, or a duplicated rule. Item 2's
+multi-table GENERATE path does give a wrong number (a formula reads `[T::LEVEL]` while the Model
+keeps `LEVEL (Custom SQL Query8)`; the only signal is the generic "Unresolved Custom SQL Query
+alias" warning), as does item 11 on a Liveboard; both predate the PR. Items 10-16 come from the
+re-review (head `f4ef5f74`).
+
+1. **Merge into a multi-table Model can bind a suffixed ref to the wrong table.** `_remap_multi_table`
+   (`tableau/build_model.py`) scopes a suffixed key by its base name, so with `LEVEL` on table A and
+   `LEVEL (Custom SQL Query8)` on table B the ref becomes `[A::LEVEL (Custom SQL Query8)]`; the
+   model-wide keep and `live_suffixed_columns` then suppress the pre-import warning, and the formula
+   fails at import and is dropped by the retry (base warned and stripped it). Key the keep and the
+   suppression by `TABLE::COL`, or look up the full suffixed name first.
+2. **The flag can do nothing without saying so.** No stderr line on a multi-relation datasource or
+   with `--existing-guid` (unlike `--table-name-map`); a keyed file whose key misses only prints
+   "0 suffixed column(s) kept"; a bare list or `{"columns": …}` file applies to every single-table
+   datasource in a whole-workbook run. The multi-table GENERATE path keeps the suffixed Model column
+   but strips the ref (pre-existing), though the flag holds the fact needed to keep it.
+3. **A case-insensitive match keeps the workbook's spelling** in `db_column_name`
+   (`reconcile.bound_suffixed_columns` / `clean_columns`); emit the warehouse's spelling, since a
+   quoted identifier is case-sensitive. Whether ThoughtSpot matches `db_column_name` case-insensitively
+   is unverified.
+4. **One suffix rule, three spellings.** `reconcile._SUFFIX` (`\d+`) and `build_model._CSQ_SUFFIX` /
+   `_CSQ_IN_REF` (`\d*`); the GENERATE keep (`strip_suffix_in_expr(bound=)`) and the merge keep
+   (`strip_csq_suffixes(keep=)`) disagree on an unnumbered `(Custom SQL Query)` ref, on a suffixed
+   string literal, and on `LEVEL(Custom SQL Query8)`. One shared regex and one keep/strip function in
+   `reconcile.py`, with `build_model` delegating. `load_warehouse_columns` reads a file inside a module
+   documented as pure: move it with the other loaders (item 5).
+5. **`commands/tableau.py` ratchet.** Raised 1596 → 1625 for the option's wiring. Moving the three JSON
+   option loaders (`_load_table_name_map`, `_load_column_name_map`, `_load_warehouse_columns`, ~55
+   lines) to `tableau/` would bring it back under 1596; lower the ratchet then. The ratchet comment
+   should also name `reconcile.py` and `validate.py`, where most of the logic is.
+6. **Wording and output.** `--help` does not say "single-table datasource"; no minimum ts-cli version
+   beside the flag in SKILL.md / step-5; the `INFORMATION_SCHEMA.COLUMNS` advice needs a reshaping step
+   (raw `[{"COLUMN_NAME": …}]` is rejected); the bound count is on stderr only, not in the result JSON
+   the Step 12 report reads.
+7. **Loader robustness.** `read_text()` with no encoding (cp1252 on Windows below Python 3.15); a
+   directory or unreadable path escapes `except ValueError` as a traceback. The sibling loaders share
+   the pattern.
+8. **`ts tableau verify` after `--table-name-map`.** Reports "Physical table(s) dropped from the model:
+   sqlproxy" whenever the map renames `sqlproxy` (`tableau/verify.py`), so Step 6's fidelity gate fails
+   on correct output for the Step 5b procedure. Pre-existing; teach `verify.py` the rename (BL-314
+   class) with a test that a genuine drop still fails.
+9. **I3 advisory.** A generated formula MEASURE carries no `index_type: DONT_INDEX` (auditor WARN;
+   not new in this PR).
+
+10. **The equal-caption collision across datasources.** The fix renames a bound column that shares a
+    caption within one datasource; in a whole-workbook run where two datasources map to one table,
+    the shared `table_registry` keeps the first definition per `db_column_name` and the Table
+    writer's `cmap` (`commands/tableau.py`) is keyed by display name, so datasource order can still
+    emit `LEVEL` twice and drop the suffixed column (lint XREF; loud). The same root hits two
+    unsuffixed columns sharing a caption, on main too. Name each Table column from its own
+    `db_column_name`, with a two-datasource test in both orders. Whether Tableau writes two equal
+    captions at all is unsettled (`twb.py` says it bakes the suffix into a colliding caption);
+    settle it, and the `reconcile.clean_columns` docstring's claim, with a real workbook.
+11. **Liveboard fields bind by caption.** `dashboards._resolve` names a field by its Tableau caption,
+    so a visual on the suffixed field binds `[Level]`, i.e. `LEVEL`, when both share the caption;
+    no warning, and lint/verify do not check Liveboard columns (as on main). Resolve a shared-caption
+    field by the Model's rule, with a test; until then coverage-matrix row 141 covers the Model only.
+12. **Untested details.** The case-insensitive caption collision (a case-sensitive count passes every
+    test, and `_dedup_columns_ci` then drops the suffixed column silently), and the documented
+    `Warehouse columns: N suffixed column(s) kept` stderr line.
+13. **SKILL.md pointer.** The trim to stay under the context-cost ratchet dropped the link to
+    `references/step-5-tml-generation.md` from the `--warehouse-columns` sentence; restore a direct
+    link when the skill has room.
+14. **Unnumbered suffix wording.** README's "not stripped either way" holds in GENERATE only; merge
+    mode strips it, and with the flag an unnumbered column reports "0 kept" and its ref still warns.
+    Folds into item 4.
+15. **`--reconcile-table` with `--warehouse-columns`.** `apply_reconciliation`'s `::COL\b` match
+    reads a kept `[T::LEVEL (Custom SQL Query8)]` as a ref to `LEVEL`: the formula is dropped when
+    the target lacks `LEVEL`, and `--column-name-map {"LEVEL": "TIER"}` rewrites it to a column no
+    table has. Undocumented combination; loud at import.
+
+**Done when.** Each item is fixed with a test, or recorded here as declined with its reason.
